@@ -1,5 +1,4 @@
 import json
-
 import mdtraj as md
 import networkx as nx
 import numpy as np

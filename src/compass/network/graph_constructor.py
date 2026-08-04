@@ -1,10 +1,8 @@
 import json
-
 import matplotlib.pyplot as plt
 import networkx as nx
 
 from compass.network import read_files as rf
-
 
 class GraphConstructor:
     """
@@ -16,7 +14,6 @@ class GraphConstructor:
         distance_cutoffs (list): List of distance cutoffs for graph generation.
         reader (ReadFiles): Instance of ReadFiles class for reading matrices.
     """
-
     def __init__(self, distance_file, adjacency_file, distance_cutoffs):
         """
         Initializes the GraphConstructor with file paths and distance cutoffs.
@@ -31,8 +28,7 @@ class GraphConstructor:
         self.distance_cutoffs = distance_cutoffs
         self.reader = rf.ReadFiles()  # Create an instance of ReadFiles
 
-    def build_graph_from_matrices(self, distance_file, adjacency_file,
-                                  distance_cutoff, atom_mapping):
+    def build_graph_from_matrices(self, distance_file, adjacency_file, distance_cutoff, atom_mapping):
         """
         Builds a graph using distance and adjacency matrices with a specified distance cutoff.
 
@@ -57,8 +53,7 @@ class GraphConstructor:
         # Add edges based on the distance and adjacency matrices
         for i in range(num_nodes):
             for j in range(i + 1, num_nodes):
-                if min_dist_matrix[i, j] < int(distance_cutoff) and \
-                        adjacency_matrix[i, j] > 0:
+                if min_dist_matrix[i, j] < int(distance_cutoff) and adjacency_matrix[i, j] > 0:
                     G.add_edge(i, j, weight=adjacency_matrix[i, j])
         return G
 
@@ -71,10 +66,7 @@ class GraphConstructor:
             atom_mapping (dict): The atom mapping to save.
             output_file (str): Path to the output JSON file.
         """
-        data = {
-            'graph': nx.readwrite.json_graph.node_link_data(G),
-            'atom_mapping': atom_mapping
-        }
+        data = {'graph': nx.readwrite.json_graph.node_link_data(G), 'atom_mapping': atom_mapping}
         with open(output_file, 'w') as f:
             json.dump(data, f)
         print(f" 📥  Graph and atom mapping saved to {output_file}")
@@ -125,9 +117,7 @@ class GraphConstructor:
             # Connect all components to the largest component
             for component in components:
                 if component != largest_component:
-                    G.add_edges_from(
-                        [(list(largest_component)[0], list(component)[0])]
-                    )
+                    G.add_edges_from([(list(largest_component)[0], list(component)[0])])
         return G
 
     def write_selected_atoms_to_pdb(self, input_pdb_file, output_pdb_file):
@@ -141,8 +131,7 @@ class GraphConstructor:
         # Get atom mapping from the ReadFiles class
         atom_mapping, _ = self.reader.atom_mapping(input_pdb_file)
 
-        with open(input_pdb_file, 'r') as infile, open(output_pdb_file,
-                                                       'w') as outfile:
+        with open(input_pdb_file, 'r') as infile, open(output_pdb_file, 'w') as outfile:
             for line in infile:
                 if line.startswith("ATOM") or line.startswith("HETATM"):
                     chain_id = line[21].strip()
@@ -150,8 +139,7 @@ class GraphConstructor:
                     atom_name = line[12:16].strip()
 
                     # Check if this atom should be included based on atom mapping
-                    for index, (
-                    res_name, a_name, r_num, c_id) in atom_mapping.items():
+                    for index, (res_name, a_name, r_num, c_id) in atom_mapping.items():
                         if res_num == r_num and chain_id == c_id and atom_name == a_name:
                             outfile.write(line)
                             break

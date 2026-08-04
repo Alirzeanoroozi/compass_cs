@@ -3,54 +3,10 @@
 import time
 from collections import defaultdict
 from os.path import basename, join
-
 import mdtraj as md
 import numpy as np
 from numba import njit
 from numba.typed.typeddict import Dict
-
-'''
-def remap_toppology(topo, mini_traj, out_dir):
-    """
-    Remap the topology of a system to start from residue 1 and chain 'A'
-
-    Outputs:
-        topo_pdb_name: the renumbered topology in pdb format
-        remap_name: the mapping between the original and renumbered residues
-        renum_pdb: the renumbered pdb file
-    """
-
-    # Save original topology as pdb
-    topo_basename = split(topo)[-1].split('.')[0]
-    topo_pdb_name = join(out_dir, topo_basename + '_orig.pdb')
-    mini_traj.save_pdb(topo_pdb_name)
-
-    # Original info
-    parsed = prd.parsePDB(topo_pdb_name)
-    nums = parsed.getResnums()
-    chains = parsed.getChids()
-    segs = [f'"{x}"' if x in {"", ''} else x for x in parsed.getSegnames()]
-    orig = sorted(set(zip(nums, chains, segs)), key=lambda x: int(x[0]))
-
-    # After-mapping info
-    new_nums = list(range(1, len(orig) + 1))
-    parsed.setChids('A')
-    new_chains = parsed.getChids()
-    new_segs = [f'"{x}"' if x in {"", ''} else x for x in parsed.getSegnames()]
-    renum = sorted(set(zip(new_nums, new_chains, new_segs)),
-                   key=lambda x: int(x[0]))
-
-    # Output the re-mapping
-    remap_name = join(out_dir, topo_basename + '_mapping.txt')
-    with open(remap_name, 'w') as f:
-        for o, r in zip(orig, renum):
-            line = f'{o[0]:>6} {o[1]:>2} {o[2]:>4}  {r[0]:>6} {r[1]:>2} {r[2]:>4}\n'
-            f.write(line)
-
-    # Output renumbered pdb
-    renum_pdb = topo_pdb_name.replace('_orig.pdb', '_renum.pdb')
-    prd.writePDB(renum_pdb, parsed)
-'''
 
 
 def prepare_datastructures(arg, first_timer):
@@ -88,21 +44,16 @@ def prepare_datastructures(arg, first_timer):
     # remap_toppology(arg.topo, mini_traj, arg.out_dir)
 
     # Indices of residues in the load trajectory and equivalence
-    resids_to_atoms, resids_to_noh, internal_equiv = \
-        get_resids_indices(mini_traj)
+    resids_to_atoms, resids_to_noh, internal_equiv = get_resids_indices(mini_traj)
     # print(resids_to_atoms, "resids_to_atoms in topo_traj")
     raw = {y: x for x in resids_to_atoms for y in resids_to_atoms[x]}
     atoms_to_resids = pydict_to_numbadict(raw)
 
     # Atom selections indices for descriptors calculation
-    calphas = get_calpha_p_indices(mini_traj, atoms_to_resids,
-                                   map_file=map_file)
+    calphas = get_calpha_p_indices(mini_traj, atoms_to_resids, map_file=map_file)
     oxy, nitro = get_sb_indices(full_topo, atoms_to_resids)
-    donors, hydros, acceptors = \
-        get_dha_indices(mini_traj, arg.heavies, atoms_to_resids)
-    corr_indices_raw = get_calpha_p_indices(mini_traj, atoms_to_resids,
-                                            map_file=map_file,
-                                            numba=False).keys()
+    donors, hydros, acceptors = get_dha_indices(mini_traj, arg.heavies, atoms_to_resids)
+    corr_indices_raw = get_calpha_p_indices(mini_traj, atoms_to_resids, map_file=map_file, numba=False).keys()
     corr_indices = list(corr_indices_raw)
 
     prep_time = round(time.time() - first_timer, 2)
@@ -110,10 +61,7 @@ def prepare_datastructures(arg, first_timer):
     print(f" 📋 System details: number of residues are {len(calphas)}")
     print(f" ⏱️  Until datastructures prepared: {prep_time} s")
 
-    return (
-        mini_traj, trajs, resids_to_atoms, resids_to_noh, calphas, oxy, nitro,
-        donors, hydros, acceptors, corr_indices)
-
+    return mini_traj, trajs, resids_to_atoms, resids_to_noh, calphas, oxy, nitro, donors, hydros, acceptors, corr_indices
 
 def get_xyz_chunks(trajs, topo, chunk_size=500):
     """
@@ -169,8 +117,7 @@ def get_resids_indices(trajectory):
     # print(df_filtered[:-10],"printing df in topo_traj")
 
     # Group by chain, residue number, and segment for valid residues only
-    group_by_index = df_filtered.groupby(
-        ["chainID", "resSeq", "segmentID"]).indices
+    group_by_index = df_filtered.groupby(["chainID", "resSeq", "segmentID"]).indices
 
     # Create non-hydrogen version
     group_by_index_noh = {}
@@ -184,52 +131,13 @@ def get_resids_indices(trajectory):
 
     # Transform to zero-based indices dictionaries
     res_ind_zero = {i: group_by_index[x] for i, x in enumerate(group_by_index)}
-    res_ind_noh = {i: group_by_index_noh[x] for i, x in
-                   enumerate(group_by_index_noh)}
+    res_ind_noh = {i: group_by_index_noh[x] for i, x in enumerate(group_by_index_noh)}
 
     # Convert to numba dictionaries
     res_ind_numba = pydict_to_numbadict(res_ind_zero)
     res_ind_noh_numba = pydict_to_numbadict(res_ind_noh)
 
     return res_ind_numba, res_ind_noh_numba, babel_dict
-
-
-'''
-def get_resids_indices(trajectory):
-    """
-    Get indices of residues in the load trajectory
-
-    Args:
-        trajectory: trajectory loaded in mdtraj format
-
-    Returns:
-        res_ind_numba: numba Dict of each residue's indices
-        babel_dict: the equivalence between the original resid numbering and
-                    the 0-based used internally
-    """
-    # Parse the topological information
-    df = trajectory.topology.to_dataframe()[0]
-    group_by_index = df.groupby(["chainID", "resSeq", "segmentID"]).indices
-    group_by_index_noh = {}
-    for key in group_by_index:
-        values = group_by_index[key]
-        noh = values[df.loc[values, "element"] != "H"]
-        group_by_index_noh[key] = noh
-
-    babel_dict = {i: x for i, x in enumerate(group_by_index)}
-    babel_dict_noh = {i: x for i, x in enumerate(group_by_index_noh)}
-
-    # Transform to numba-dict
-    res_ind_zero = {i: group_by_index[x] for i, x in enumerate(group_by_index)}
-    res_ind_noh = {i: group_by_index_noh[x] for i, x in
-                   enumerate(group_by_index_noh)}
-
-    res_ind_numba = pydict_to_numbadict(res_ind_zero)
-    res_ind_noh_numba = pydict_to_numbadict(res_ind_noh)
-    return res_ind_numba, res_ind_noh_numba, babel_dict
-
-'''
-
 
 def get_corr_indices(trajectory, map_file):
     """
@@ -290,8 +198,7 @@ def get_calpha_p_indices(trajectory, atoms_to_resids, map_file, numba=True):
     calphas_p = {i: atoms_to_resids[calphas_p_raw[i]] for i in range(n_resids)}
 
     if len(calphas_p) != n_resids:
-        raise ValueError("\nThe number of calphas + P atoms is different from"
-                         " the number of residues")
+        raise ValueError("\nThe number of calphas + P atoms is different from the number of residues")
 
     if numba:
         alphas = pydict_to_numbadict(calphas_p)
@@ -336,7 +243,6 @@ def get_sb_indices(topo_df, atoms_to_resids):
                   nitro_raw1}
     nitro = pydict_to_numbadict(nitro_raw3)
     return oxy, nitro
-
 
 def get_dha_indices(trajectory, heavies_elements, atoms_to_resids):
     """
@@ -392,7 +298,6 @@ def get_dha_indices(trajectory, heavies_elements, atoms_to_resids):
     acceptors = pydict_to_numbadict(a_raw3)
     return donors, hydros, acceptors
 
-
 @njit(parallel=False)
 def dict_get(dico, key):
     """
@@ -413,7 +318,6 @@ def dict_get(dico, key):
     except:
         return None
 
-
 def pydict_to_numbadict(py_dict):
     """
     Converts from Python dict to Numba dict
@@ -428,7 +332,6 @@ def pydict_to_numbadict(py_dict):
     for key in py_dict:
         numba_dict.update({key: py_dict[key]})
     return numba_dict
-
 
 def to_matrix(one_dim_array, n, nested=False):
     """
@@ -459,7 +362,6 @@ def to_matrix(one_dim_array, n, nested=False):
     matrix += matrix.T
     return matrix
 
-
 class Mapping:
     # todo: simiplify with prody or another pdb parser as explicit line
     #  handling in PDB can be tricky even if standard format exists
@@ -486,10 +388,7 @@ class Mapping:
         map_file = join(self.out_dir, basename(map_file_raw))
 
         # Open input PDB file for reading, renumbered PDB file and map file for writing
-        with open(input_pdb, "r") as infile, open(renumbered_pdb,
-                                                  "w") as outfile, open(
-            map_file, "w"
-        ) as mapfile:
+        with open(input_pdb, "r") as infile, open(renumbered_pdb, "w") as outfile, open(map_file, "w") as mapfile:
             # Initialize variables for residue renumbering and mapping
             current_residue_number = 0
             residue_map = {}

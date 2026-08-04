@@ -2,11 +2,8 @@
 import os
 import time
 import shutil
-import json
-import networkx as nx
 
-from compass.network.communities_cliques import CliqueDetector, \
-    CommunityDetector
+from compass.network.communities_cliques import CliqueDetector, CommunityDetector
 from compass.network.graph_constructor import GraphConstructor
 from compass.network.networkparameters import NetworkParameters
 from compass.network.pymol_visualizer import PyMOLVisualizer
@@ -27,8 +24,7 @@ def process_graphs(param_space, distance_cutoffs):
         adjacency_file=param_space.adjacency_file,
         distance_cutoffs=distance_cutoffs
     )
-    atom_mapping, _ = graph_constructor.reader.atom_mapping(
-        param_space.pdb_file_path)
+    atom_mapping, _ = graph_constructor.reader.atom_mapping(param_space.pdb_file_path)
 
     # Iterate over each distance cutoff to build and process the graph
     for distance_cutoff in graph_constructor.distance_cutoffs:
@@ -39,24 +35,19 @@ def process_graphs(param_space, distance_cutoffs):
             distance_file=param_space.min_dist_matrix_file,
             adjacency_file=param_space.adjacency_file,
             distance_cutoff=distance_cutoff,
-            atom_mapping=atom_mapping)
+            atom_mapping=atom_mapping
+        )
         # Ensure graph connectivity
         G = graph_constructor.ensure_graph_connectivity(G)
         # Define file names based on the distance cutoff
         graph_filename = f"graph_cutoff_{distance_cutoff}.json"
-        output_graph_file = os.path.join(param_space.network_dir,
-                                         graph_filename)
+        output_graph_file = os.path.join(param_space.network_dir, graph_filename)
         # Save the graph and atom mapping
-        graph_constructor.save_graph_and_mapping(G, atom_mapping,
-                                                 output_file=output_graph_file)
+        graph_constructor.save_graph_and_mapping(G, atom_mapping, output_file=output_graph_file)
         # Plot and save histogram
-        output_file_prefix = os.path.join(param_space.network_dir,
-                                          f"graph_cutoff_{distance_cutoff}")
-        graph_constructor.plot_and_save_histogram(G,
-                                                  output_file_prefix=output_file_prefix)
-        print(
-            f" 🖥️  Processed graph for cutoff {distance_cutoff} in {round(time.time() - start_time, 2)} seconds")
-
+        output_file_prefix = os.path.join(param_space.network_dir, f"graph_cutoff_{distance_cutoff}")
+        graph_constructor.plot_and_save_histogram(G, output_file_prefix=output_file_prefix)
+        print(f" 🖥️  Processed graph for cutoff {distance_cutoff} in {round(time.time() - start_time, 2)} seconds")
 
 def process_graph_files(results_dir, dist_cutoff_graph):
     """

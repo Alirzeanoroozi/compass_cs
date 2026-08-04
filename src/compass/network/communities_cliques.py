@@ -1,5 +1,4 @@
 from typing import Dict, List
-
 import igraph as ig
 import leidenalg as la
 import networkx as nx

@@ -1,9 +1,3 @@
-# Created by gonzalezroy at 6/6/24
-"""
-Run the computation of descriptors
-"""
-
-# %%
 import os
 import time
 from os.path import join
@@ -19,8 +13,6 @@ import compass.descriptors.pca as pca
 import compass.descriptors.topo_traj as tt
 import compass.network.generals as gn
 
-
-# todo: testing access
 def runner():
     """
     Entry point for running the compass workflow
@@ -32,23 +24,17 @@ def runner():
     first_timer = time.time()
     # Parse configuration file
     if len(sys.argv) != 2:
-        raise ValueError(
-            '\ncompass syntax is: compass path-to-config-file')
+        raise ValueError('\ncompass syntax is: compass path-to-config-file')
     config_path = sys.argv[1]
     arg, dict_arg = cfg.parse_params(config_path)
 
     # Prepare data structures
-    (mini_traj, trajs, resids_to_atoms, resids_to_noh, calphas, oxy, nitro,
-     donors, hydros, acceptors, corr_indices) = tt.prepare_datastructures(
-        arg, first_timer)
+    mini_traj, trajs, resids_to_atoms, resids_to_noh, calphas, oxy, nitro, donors, hydros, acceptors, corr_indices = tt.prepare_datastructures(arg, first_timer)
 
     # =========================================================================
     # 2. Compute descriptors
     # =========================================================================
-    (ave_min_dist, occ_nb, cp, occ_sb, occ_hb, occ_int, mi,
-     gc) = mm.compute_descriptors(mini_traj, trajs, arg, resids_to_atoms,
-                                  resids_to_noh, calphas, oxy, nitro, donors,
-                                  hydros, acceptors, corr_indices, first_timer)
+    ave_min_dist, occ_nb, cp, occ_sb, occ_hb, occ_int, mi, gc = mm.compute_descriptors(mini_traj, trajs, arg, resids_to_atoms, resids_to_noh, calphas, oxy, nitro, donors, hydros, acceptors, corr_indices, first_timer)
     # invert CP matrix
     cp = abs(cp - max(cp))
 
@@ -56,9 +42,7 @@ def runner():
     # 3. Save matrices
     # =========================================================================
     n = len(resids_to_atoms)
-    matrices, matrices_names = geom.process_matrices(
-        arg, n, calphas, ave_min_dist, occ_nb, cp, occ_sb, occ_hb, occ_int, mi,
-        gc, first_timer)
+    matrices, matrices_names = geom.process_matrices(arg, n, calphas, ave_min_dist, occ_nb, cp, occ_sb, occ_hb, occ_int, mi, gc, first_timer)
 
     # =========================================================================
     # 4. Perform PCA & generate adjacency matrix from PCA results
@@ -74,8 +58,7 @@ def runner():
     arg.min_dist_matrix_file = matrices_names["MINDIST"]
     arg.network_dir = join(dict_arg["generals"]["output_dir"], 'network')
     os.makedirs(arg.network_dir, exist_ok=True)
-    dist_cutoffs = [dict_arg["distance cutoffs"]["Graph"],
-                    dict_arg["distance cutoffs"]["Cliques"]]
+    dist_cutoffs = [dict_arg["distance cutoffs"]["Graph"], dict_arg["distance cutoffs"]["Cliques"]]
 
     # Create a PDB for the network visualization
     dirname, filename = os.path.split(arg.topo)
@@ -94,26 +77,21 @@ def runner():
     print(f' ⏳  Until network parameters computed: {network_time} s')
 
     # Compute communities and cliques
-    gn.process_graph_files_for_communities_and_cliques(arg.network_dir,
-                                                       dist_cutoffs[0],
-                                                       dist_cutoffs[1])
+    gn.process_graph_files_for_communities_and_cliques(arg.network_dir, dist_cutoffs[0], dist_cutoffs[1])
     clique_time = round(time.time() - first_timer, 2)
     print(f' ⏳  Until communities and cliques detection: {clique_time} s')
 
     # =========================================================================
     # 6. Generate PyMOL scripts
     # =========================================================================
-    gn.generate_pymol_scripts(arg.network_dir, arg.pdb_file_path,
-                              dist_cutoffs[0], dist_cutoffs[1])
+    gn.generate_pymol_scripts(arg.network_dir, arg.pdb_file_path, dist_cutoffs[0], dist_cutoffs[1])
     if dict_arg["paths"]["find_path"] == 'True':
         source_residues = dict_arg["paths"]["sources"].split(",")
         target_residues = dict_arg["paths"]["targets"].split(",")
 
         for source_residue in source_residues:
             for target_residue in target_residues:
-                gn.find_paths(arg.pdb_file_path, arg.network_dir,
-                              dist_cutoffs[0], source_residue.strip(),
-                              target_residue.strip())
+                gn.find_paths(arg.pdb_file_path, arg.network_dir, dist_cutoffs[0], source_residue.strip(), target_residue.strip())
 
     end_resources, end_time = resource_usage(RUSAGE_SELF), timestamp()
     real_time = end_time - start_time

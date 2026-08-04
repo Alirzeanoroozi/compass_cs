@@ -3,7 +3,6 @@
 Functions related to the calculation of geometric descriptor matrices
 """
 import time
-
 import numpy as np
 from numba import njit, prange
 
@@ -12,12 +11,7 @@ import compass.descriptors.geometry as geom
 import compass.descriptors.topo_traj as tt
 
 
-# todo: update the docstrings
-
-
-def compute_descriptors(mini_traj, trajs, arg, resids_to_atoms, resids_to_noh,
-                        calphas, oxy, nitro, donors, hydros, acceptors,
-                        corr_indices, first_timer):
+def compute_descriptors(mini_traj, trajs, arg, resids_to_atoms, resids_to_noh, calphas, oxy, nitro, donors, hydros, acceptors, corr_indices, first_timer):
     """
     Compute the compass descriptors for the trajectory
 
@@ -51,13 +45,10 @@ def compute_descriptors(mini_traj, trajs, arg, resids_to_atoms, resids_to_noh,
     pair_int_sum = np.zeros(n_pairs)
 
     # Compile numba function
-    get_chunk_info(mini_traj.xyz, resids_to_atoms, resids_to_noh, arg.nb_cut,
-                   arg.sb_cut, arg.da_cut, arg.ha_cut, arg.dha_cut, calphas,
-                   oxy, nitro, donors, hydros, acceptors)
+    get_chunk_info(mini_traj.xyz, resids_to_atoms, resids_to_noh, arg.nb_cut, arg.sb_cut, arg.da_cut, arg.ha_cut, arg.dha_cut, calphas, oxy, nitro, donors, hydros, acceptors)
 
     comp_time = round(time.time() - first_timer, 2)
-    print(
-        f" ⏱️  Until compilation of descriptors-related functions: {comp_time} s")
+    print(f" ⏱️  Until compilation of descriptors-related functions: {comp_time} s")
 
     # Do a first pass to compute most descriptors
     chunks = tt.get_xyz_chunks(trajs, arg.topo, chunk_size=100)
@@ -65,17 +56,13 @@ def compute_descriptors(mini_traj, trajs, arg, resids_to_atoms, resids_to_noh,
     n_frames = 0
     for chunk in chunks:
         n_frames += chunk.shape[0]
-        pair_min_dist, pair_cp, pair_nb, pair_sb, pair_hb, pair_int = \
-            get_chunk_info(chunk, resids_to_atoms, resids_to_noh, arg.nb_cut,
-                           arg.sb_cut, arg.da_cut, arg.ha_cut, arg.dha_cut,
-                           calphas, oxy, nitro, donors, hydros, acceptors)
-
-        pair_min_dist_sum = sum_arrays(pair_min_dist, pair_min_dist_sum)
-        pair_cp_sum = sum_arrays(pair_cp, pair_cp_sum)
-        pair_nb_sum = sum_arrays(pair_nb, pair_nb_sum)
-        pair_sb_sum = sum_arrays(pair_sb, pair_sb_sum)
-        pair_hb_sum = sum_arrays(pair_hb, pair_hb_sum)
-        pair_int_sum = sum_arrays(pair_int, pair_int_sum)
+        pair_min_dist, pair_cp, pair_nb, pair_sb, pair_hb, pair_int = get_chunk_info(chunk, resids_to_atoms, resids_to_noh, arg.nb_cut, arg.sb_cut, arg.da_cut, arg.ha_cut, arg.dha_cut, calphas, oxy, nitro, donors, hydros, acceptors)
+        pair_min_dist_sum += pair_min_dist
+        pair_cp_sum += pair_cp
+        pair_nb_sum += pair_nb
+        pair_sb_sum += pair_sb
+        pair_hb_sum += pair_hb
+        pair_int_sum += pair_int
 
     # Compute average values
     ave_min_dist = (pair_min_dist_sum / n_frames) * 10
@@ -95,7 +82,7 @@ def compute_descriptors(mini_traj, trajs, arg, resids_to_atoms, resids_to_noh,
     for chunk in chunks:
         # Compute CP
         pair_cp2 = get_chunk_cp(chunk, resids_to_atoms, ave_pair_cp, calphas)
-        pair_cp_sum2 = sum_arrays(pair_cp2, pair_cp_sum2)
+        pair_cp_sum2 += pair_cp2
 
         # Get correlation coordinates
         corr_chunk = chunk[:, corr_indices]
@@ -111,11 +98,8 @@ def compute_descriptors(mini_traj, trajs, arg, resids_to_atoms, resids_to_noh,
     print(f" ⏱️  Until descriptors computed: {running_time} s")
     return ave_min_dist, occ_nb, cp, occ_sb, occ_hb, occ_int, mi, gc
 
-
 @njit(parallel=True)
-def get_chunk_info(traj_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut,
-                   da_cut, ha_cut, dha_cut, calphas, oxy, nitro, donors,
-                   hydros, acceptors):
+def get_chunk_info(traj_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut, da_cut, ha_cut, dha_cut, calphas, oxy, nitro, donors, hydros, acceptors):
     """
     Get the minimum distance between every pair of residues averaged along
     the trajectory
@@ -158,11 +142,7 @@ def get_chunk_info(traj_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut,
     # Compute all interactions for each frame in parallel
     for frame in prange(n_frames):
         frame_coords = traj_coords[frame]
-        pair_min_dists, pair_nb, pair_cp, pair_sb, pair_hb, pair_int = \
-            get_frame_info(frame_coords, resids_to_atoms, resids_to_noh,
-                           nb_cut, sb_cut, da_cut, ha_cut, dha_cut, calphas,
-                           oxy, nitro, donors, hydros, acceptors, )
-
+        pair_min_dists, pair_nb, pair_cp, pair_sb, pair_hb, pair_int = get_frame_info(frame_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut, da_cut, ha_cut, dha_cut, calphas, oxy, nitro, donors, hydros, acceptors)
         # Uptade the sum of interactions
         pair_min_dist_sum += pair_min_dists
         pair_cp_sum += pair_cp
@@ -170,9 +150,7 @@ def get_chunk_info(traj_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut,
         pair_sb_sum += pair_sb
         pair_hb_sum += pair_hb
         pair_int_sum += pair_int
-    return (
-    pair_min_dist_sum, pair_cp_sum, pair_nb_sum, pair_sb_sum, pair_hb_sum,
-    pair_int_sum)
+    return pair_min_dist_sum, pair_cp_sum, pair_nb_sum, pair_sb_sum, pair_hb_sum, pair_int_sum
 
 
 @njit(parallel=True)
@@ -219,9 +197,7 @@ def get_chunk_cp(traj_coords, resids_to_atoms, pair_cp_sum, calphas):
 
 
 @njit(parallel=False)
-def get_frame_info(frame_coords, resids_to_atoms, resids_to_noh, nb_cut,
-                   sb_cut, da_cut, ha_cut, dha_cut, calphas, oxy, nitro,
-                   donors, hydros, acceptors):
+def get_frame_info(frame_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut, da_cut, ha_cut, dha_cut, calphas, oxy, nitro, donors, hydros, acceptors):
     """
     Args:
         frame_coords: xyz coordinates of the frame
@@ -328,21 +304,3 @@ def get_frame_info(frame_coords, resids_to_atoms, resids_to_noh, nb_cut,
 
             index += 1
     return pair_min_dists, pair_nb, pair_cp, pair_sb, pair_hb, pair_int
-
-
-@njit(parallel=True)
-def sum_arrays(arr1, arr2):
-    """
-    Sum two one-dimensional arrays
-
-    Args:
-        arr1: first array
-        arr2: second array
-
-    Returns:
-        sum_arr: sum of the two arrays
-    """
-    sum_arr = np.zeros(len(arr1))
-    for i in prange(len(arr1)):
-        sum_arr[i] = arr1[i] + arr2[i]
-    return sum_arr
