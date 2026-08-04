@@ -35,12 +35,8 @@ class ReadFiles:
         trajectory = md.load(file_path)
         topology = trajectory.topology
 
-        ca_atoms = trajectory.topology.select('name CA')
-        dna = "(resname =~ '(5|3)?D([ATGC]){1}(3|5)?$')"
-        rna = "(resname =~ '(3|5)?R?([AUGC]){1}(3|5)?$')"
-        p_atoms = trajectory.topology.select(
-            f'({dna} or {rna}) and name "C5\'"')
-        all_atoms = sorted(np.concatenate((ca_atoms, p_atoms)).astype(int))
+        from compass.descriptors.topo_traj import select_backbone_atoms
+        all_atoms = select_backbone_atoms(topology)
 
         atom_mapping = {}  # Maps node index to atom information
         atoms = []
@@ -51,16 +47,16 @@ class ReadFiles:
 
         # Process selected atoms to build atom_mapping
         for atom_index in all_atoms:
-            atom = topology.atom(atom_index)
+            atom = topology.atom(int(atom_index))
             residue = atom.residue
             chain_id = residue.chain.chain_id if residue.chain.chain_id is not None else ''
             residue_name = residue.name
             residue_id = residue.resSeq
             atom_name = atom.name
 
-            if atom_name == 'CA':
+            if atom_name in ('CA', 'GC'):
                 amino_acid_count += 1
-            elif atom_name == "C5'":
+            elif atom_name in ("C5'", 'C5X'):
                 nucleic_acid_count += 1
 
             atoms.append((residue_name, atom_name, residue_id, chain_id))
@@ -112,7 +108,7 @@ class ReadFiles:
 
     def read_centrality_from_file(file_path):
         """
-        Processes a file containing node metrics.
+        Processes a JSON file containing node centrality metrics.
 
         Args:
             file_path (str): Path to the input file.
@@ -120,76 +116,40 @@ class ReadFiles:
         Returns:
             pd.DataFrame: A DataFrame containing parsed node metrics.
         """
-        data = []
-
         with open(file_path, 'r') as f:
-            for line in f:
-                line = line.strip()
+            payload = json.load(f)
 
-                # Skip empty lines or headers
-                if not line or line.startswith("Node Res_num Chain_ID"):
-                    continue
-
-                try:
-                    # Split the line into components
-                    parts = line.split("\t")
-                    # Parse the Node column (e.g., "Node (1,A)")
-                    node_info = parts[0].split(" ")
-                    node_details = node_info[1].strip("()").split(",")
-                    # print(node_details)
-                    node_res_num = int(
-                        node_details[0])  # Extract residue number
-                    chain_id = node_details[1]  # Extract chain ID
-                    # Parse the remaining columns
-                    betweenness = float(parts[1])
-                    closeness = float(parts[2])
-                    degree = int(parts[3])
-                    # Append to the data list
-                    data.append({
-                        "Node_Res_Num": node_res_num,
-                        "Chain_ID": chain_id,
-                        "Betweenness": betweenness,
-                        "Closeness": closeness,
-                        "Degree": degree
-                    })
-                except (ValueError, IndexError) as e:
-                    print(f"Skipping line due to parsing error: {line} ({e})")
-
-        # Convert data to a Pandas DataFrame for further analysis
-        df = pd.DataFrame(data)
-        return df
+        data = []
+        for node in payload.get("nodes", []):
+            data.append({
+                "Node_Res_Num": int(node["res_num"]),
+                "Chain_ID": node.get("chain_id", ""),
+                "Betweenness": float(node["betweenness"]),
+                "Closeness": float(node["closeness"]),
+                "Degree": int(node["degree"]),
+            })
+        return pd.DataFrame(data)
 
     def read_edge_betweenness_from_file(file_path):
-        edges = []
-        with open(file_path, 'r') as f:
-            for line in f:
-                line = line.strip()
-                # Skip empty lines or headers
-                if not line or line.startswith("Edge"):
-                    continue
-                try:
-                    # Split the line into edge and betweenness
-                    parts = line.split("\t")
-                    # Parse the edge column (e.g., "(1,A)-(2,A)")
-                    edge_info = parts[0].strip("()").split(")-(")
-                    node1 = edge_info[0].strip("()")
-                    node2 = edge_info[1].strip("()")
-                    # Extract residue numbers and chain IDs
-                    res1, chain1 = node1.split(",")
-                    res2, chain2 = node2.split(",")
-                    # Parse betweenness
-                    betweenness = float(parts[1])
-                    # Append the data to the list
-                    edges.append({
-                        "Res1": int(res1),
-                        "Chain1": chain1,
-                        "Res2": int(res2),
-                        "Chain2": chain2,
-                        "Betweenness": betweenness
-                    })
-                except (ValueError, IndexError) as e:
-                    print(f"Skipping line due to parsing error: {line} ({e})")
+        """
+        Processes a JSON file containing edge betweenness metrics.
 
-        # Convert list of edges to DataFrame
-        df = pd.DataFrame(edges)
-        return df
+        Args:
+            file_path (str): Path to the input file.
+
+        Returns:
+            pd.DataFrame: A DataFrame containing parsed edge metrics.
+        """
+        with open(file_path, 'r') as f:
+            payload = json.load(f)
+
+        edges = []
+        for edge in payload.get("edges", []):
+            edges.append({
+                "Res1": int(edge["res_num1"]),
+                "Chain1": edge.get("chain_id1", ""),
+                "Res2": int(edge["res_num2"]),
+                "Chain2": edge.get("chain_id2", ""),
+                "Betweenness": float(edge["betweenness"]),
+            })
+        return pd.DataFrame(edges)

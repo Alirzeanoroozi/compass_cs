@@ -56,13 +56,13 @@ def runner():
     # Construct graphs
     arg.adjacency_file = adj_name
     arg.min_dist_matrix_file = matrices_names["MINDIST"]
-    arg.network_dir = join(dict_arg["generals"]["output_dir"], 'network')
+    arg.network_dir = join(arg.out_dir, 'network')
     os.makedirs(arg.network_dir, exist_ok=True)
     dist_cutoffs = [dict_arg["distance cutoffs"]["Graph"], dict_arg["distance cutoffs"]["Cliques"]]
 
-    # Create a PDB for the network visualization
-    dirname, filename = os.path.split(arg.topo)
-    pdb_name = join(dirname, f'{filename.split(".")[0]}_internal.pdb')
+    # Create a PDB for the network visualization under the network output folder
+    filename = os.path.basename(arg.topo)
+    pdb_name = join(arg.network_dir, f'{os.path.splitext(filename)[0]}_internal.pdb')
     parsed = next(md.iterload(arg.traj, top=arg.topo, chunk=1))
     parsed.save_pdb(pdb_name)
     arg.pdb_file_path = pdb_name

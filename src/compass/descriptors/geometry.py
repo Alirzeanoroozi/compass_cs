@@ -236,36 +236,20 @@ def plot_matrix(matrix, matrix_title, output_name):
     plt.close()
 
 
-def process_matrices(arg, n, calphas, ave_min_dist, occ_nb, cp, occ_sb, occ_hb,
-                     occ_int, mi, gc, first_timer, ):
+def process_matrices(arg, n, calphas, ave_min_dist, occ_nb, cp, occ_sb, occ_hb, occ_int, mi, gc, first_timer):
     # Declare missing residues
     # cp_miss = [i for i, x in enumerate(calphas) if calphas[x] == -1]
 
     # Declare matrices to process
     matrices = {
-        "MINDIST": {"data": ave_min_dist, "norm": False,
-                    "prec": 4, "title": "Pairwise Minimum Distances"},
-
-        "NONBOND": {"data": occ_nb, "norm": False, "prec": 4,
-                    "title": "Non-Bonded Interactions"},
-
-        "SALTBRIDGES": {"data": occ_sb, "norm": False, "prec": 4,
-                        "title": "Salt Bridges"},
-
-        "HBONDS": {"data": occ_hb, "norm": False, "prec": 4,
-                   "title": "Hydrogen Bonds"},
-
-        "INTERACTIONS": {"data": occ_int, "norm": False, "prec": 2,
-                         "title": "Interactions"},
-
-        "COMMPROP": {"data": cp, "norm": True, "prec": 4,
-                     "title": "Communication Properties"},
-
-        "MI": {"data": mi, "norm": True, "prec": 4,
-               "title": "Mutual Information"},
-
-        "GC": {"data": gc, "norm": True, "prec": 4,
-               "title": "Generalized Correlation"},
+        "MINDIST": {"data": ave_min_dist, "norm": False, "prec": 4, "title": "Pairwise Minimum Distances"},
+        "NONBOND": {"data": occ_nb, "norm": False, "prec": 4, "title": "Non-Bonded Interactions"},
+        "SALTBRIDGES": {"data": occ_sb, "norm": False, "prec": 4, "title": "Salt Bridges"},
+        "HBONDS": {"data": occ_hb, "norm": False, "prec": 4, "title": "Hydrogen Bonds"},
+        "INTERACTIONS": {"data": occ_int, "norm": False, "prec": 2, "title": "Interactions"},
+        "COMMPROP": {"data": cp, "norm": True, "prec": 4, "title": "Communication Properties"},
+        "MI": {"data": mi, "norm": True, "prec": 4, "title": "Mutual Information"},
+        "GC": {"data": gc, "norm": True, "prec": 4, "title": "Generalized Correlation"},
     }
 
     # Process matrices
@@ -280,8 +264,7 @@ def process_matrices(arg, n, calphas, ave_min_dist, occ_nb, cp, occ_sb, occ_hb,
         # Save matrices
         matrix_name = get_matrix_name(arg.out_dir, arg.title, matrix)
         matrices_name.update({matrix: matrix_name})
-        matrix_data = save_matrix(data, n, matrix_name, norm=normalize,
-                                  prec=precision)
+        matrix_data = save_matrix(data, n, matrix_name, norm=normalize, prec=precision)
         matrices[matrix].update({"data": matrix_data})
 
         # Plot matrices

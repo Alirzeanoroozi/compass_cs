@@ -1,4 +1,5 @@
 import heapq
+import json
 import time
 
 import matplotlib.pyplot as plt
@@ -34,6 +35,17 @@ class NetworkParameters:
         self.G = G
         self.atom_mapping = atom_mapping if atom_mapping else {}
 
+    def _atom_info(self, node):
+        res_name, atom_name, res_num, chain_id = self.atom_mapping.get(
+            str(node), ("Unknown", "Unknown", "Unknown", "Unknown")
+        )
+        return {
+            "res_name": res_name,
+            "atom_name": atom_name,
+            "res_num": res_num,
+            "chain_id": chain_id,
+        }
+
     def compute_shortest_paths(self, all_paths_file, top_file):
         """
         Compute shortest paths between nodes until reaching 20% of total residues.
@@ -51,18 +63,12 @@ class NetworkParameters:
         Returns:
             dict: Dictionary of path lengths between node pairs
         """
-        # print("Starting shortest path computations...")
-        nodes = sorted(
-            list(self.G.nodes()))  # Sort nodes for consistent results
+        nodes = sorted(list(self.G.nodes()))
 
-        # Compute all shortest paths
         shortest_paths, path_lengths = self._compute_all_shortest_paths(nodes)
-
-        # Process paths and apply residue threshold
         collected_paths = self._collect_paths_until_threshold(
             nodes, shortest_paths, path_lengths
         )
-        # Save results to files
         self._save_paths(all_paths_file, top_file, collected_paths,
                          shortest_paths)
 
@@ -87,10 +93,8 @@ class NetworkParameters:
 
         for source in nodes:
             try:
-                # Compute all shortest paths from source in one call
                 distances, paths = nx.single_source_dijkstra(self.G, source,
                                                              weight='weight')
-                # This avoids redundant path storage
                 for target in (n for n in nodes if n > source):
                     if target in paths:
                         shortest_paths[(source, target)] = paths[target]
@@ -119,14 +123,12 @@ class NetworkParameters:
         total_residues = len(nodes)
         residue_threshold = 0.2 * total_residues
 
-        # Create and sort path list by length (descending)
         path_list = [
             (source, target, length)
             for (source, target), length in path_lengths.items()
         ]
         path_list.sort(key=lambda x: x[2], reverse=True)
 
-        # Collect paths until reaching threshold
         collected_paths = []
         unique_residues = set()
 
@@ -146,7 +148,7 @@ class NetworkParameters:
     def _save_paths(self, all_paths_file, top_file, collected_paths,
                     shortest_paths):
         """
-        Save computed paths to output files.
+        Save computed paths to JSON output files.
 
         Args:
             all_paths_file (str): File to save all collected paths
@@ -154,76 +156,79 @@ class NetworkParameters:
             collected_paths (list): List of collected path information
             shortest_paths (dict): Dictionary of shortest paths
         """
-        # Write all collected paths
+        all_paths = []
+        for (source, target), path in shortest_paths.items():
+            if not path:
+                continue
+            mapped_path = []
+            for node in path:
+                info = self._atom_info(node)
+                mapped_path.append({
+                    "res_num": info["res_num"],
+                    "chain_id": info["chain_id"],
+                })
+            all_paths.append({
+                "source": int(source),
+                "target": int(target),
+                "path": [int(n) for n in path],
+                "mapped_path": mapped_path,
+            })
+
         with open(all_paths_file, 'w') as file:
-            for (source, target), path in shortest_paths.items():
-                if not path:
-                    continue  # Skip if there is no valid path
+            json.dump({"paths": all_paths}, file)
 
-                # Write the source and target information
-                path_str = " -> ".join(map(str, path))
-                file.write(f"{source} -> {target}: Path = [{path_str}]\n")
-
-                # Write residue and chain information along the path
-                formatted_path = []
-                file.write(f"Mapped_path: ")
-                for node in path:
-                    res_name, atom_name, res_num, chain_id = self.atom_mapping.get(
-                        str(node), ("Unknown", "Unknown", "Unknown", "Unknown")
-                    )
-                    formatted_path.append(f"{res_num}_{chain_id}")
-
-                # Join and write the formatted path
-                file.write(" -> ".join(formatted_path) + "\n\n")
-
-        # Write detailed top paths with residue mapping
         self.write_top_50_shortest_paths_with_mapping(collected_paths,
                                                       shortest_paths, top_file)
 
     def write_top_50_shortest_paths_with_mapping(self, top_paths,
                                                  shortest_paths, top_file):
         """
-        Write detailed path information including residue mapping.
+        Write detailed path information including residue mapping as JSON.
 
         Args:
             top_paths (list): List of (source, target, length) tuples
             shortest_paths (dict): Dictionary of shortest paths
             top_file (str): Output file path
         """
+        unique_top_paths = set()
+        paths_out = []
+
+        for source, target, length in top_paths:
+            if source > target:
+                source, target = target, source
+
+            if (source, target) in unique_top_paths:
+                continue
+            try:
+                path = shortest_paths.get((source, target))
+                if not path:
+                    continue
+
+                mapped_path = []
+                for node in path:
+                    info = self._atom_info(node)
+                    mapped_path.append({
+                        "res_num": info["res_num"],
+                        "res_name": info["res_name"],
+                        "atom_name": info["atom_name"],
+                        "chain_id": info["chain_id"],
+                    })
+                paths_out.append({
+                    "source": int(source),
+                    "target": int(target),
+                    "length": float(length),
+                    "path": [int(n) for n in path],
+                    "mapped_path": mapped_path,
+                })
+                unique_top_paths.add((source, target))
+            except Exception as e:
+                print(f"Error processing path {source} -> {target}: {str(e)}")
+
         with open(top_file, 'w') as file:
-            file.write("Top 50 Shortest Paths:\n")
-            unique_top_paths = set()
-
-            for source, target, length in top_paths:
-                # Normalize path order to avoid duplicates
-                if source > target:
-                    source, target = target, source
-
-                if (source, target) not in unique_top_paths:
-                    try:
-                        path = shortest_paths.get((source, target))
-                        if not path:
-                            continue
-
-                        # Write path with node indices
-                        path_str = " -> ".join(map(str, path))
-                        file.write(
-                            f"{source} -> {target}: Length = {length:.2f}, Path = [{path_str}]\n")
-                        # Write path with residue mapping
-                        mapped_path = []
-                        for node in path:
-                            atom_info = self.atom_mapping.get(str(node), (
-                            'Unknown', 'Unknown', -1, 'Unknown'))
-                            mapped_path.append(
-                                f"Residue {atom_info[2]} {atom_info[1]} {atom_info[3]}")
-
-                        mapped_path_str = " -> ".join(mapped_path)
-                        file.write(f"Path_mapped = [{mapped_path_str}]\n\n")
-                        unique_top_paths.add((source, target))
-
-                    except Exception as e:
-                        print(
-                            f"Error processing path {source} -> {target}: {str(e)}")
+            json.dump({
+                "description": "Top shortest paths",
+                "paths": paths_out,
+            }, file, indent=2)
 
         print(
             f" 📥  Top 50 shortest paths with node and residue mapping written to {top_file}")
@@ -259,30 +264,23 @@ class NetworkParameters:
         """
         start_time = time.time()
 
-        # Create a matrix for the heatmap
         num_nodes = len(self.G.nodes())
         data_matrix = np.zeros((num_nodes, num_nodes))
 
         for source, paths in shortest_path_lengths.items():
             for target, length in paths.items():
                 data_matrix[int(source)][int(target)] = length
-                data_matrix[int(target)][
-                    int(source)] = length  # Ensure symmetry
+                data_matrix[int(target)][int(source)] = length
 
-        # Replace inf values in the data matrix with 0
         data_matrix[np.isinf(data_matrix)] = 0
-        # Determine the minimum and maximum values for the color scale
         vmin = np.min(data_matrix)
         vmax = np.max(data_matrix)
-        # Plot the heatmap
         plt.figure(figsize=(10, 8))
         sns.heatmap(data_matrix, annot=False, fmt=".2f", cmap="viridis",
                     cbar_kws={'label': cbar_label}, vmin=vmin, vmax=vmax)
-        # Set titles and labels
         plt.title(title)
         plt.xlabel("Node Index")
         plt.ylabel("Node Index")
-        # Save the heatmap to the specified file
         plt.savefig(heatmap_file)
         plt.close()
         end_time = time.time()
@@ -335,7 +333,6 @@ class NetworkParameters:
         node1 = None
         node2 = None
         for key, values in self.atom_mapping.items():
-            # print (key, values)
             if values[-2] == int(source_res_num) and values[
                 -1] == source_chain_id:
                 node1 = key
@@ -348,29 +345,24 @@ class NetworkParameters:
 
         def find_yen_k_paths():
             """Implementation of Yen's k shortest paths algorithm."""
-            A = []  # List of found paths
-            B = []  # Candidate paths heap
+            A = []
+            B = []
 
-            # Find the initial shortest path
             try:
                 path = nx.shortest_path(self.G, node1, node2, weight='weight')
                 A.append(path)
             except nx.NetworkXNoPath:
                 return []
 
-            # Find k-1 more paths
             for _ in range(1, k):
                 prev_path = A[-1]
 
-                # Examine each node in the previous path
                 for i in range(len(prev_path) - 1):
                     spur_node = prev_path[i]
                     root_path = prev_path[:i + 1]
 
-                    # Store removed edges to restore later
                     removed_edges = []
 
-                    # Remove edges that were part of previous paths
                     for path in A:
                         if len(path) > i and path[:i + 1] == root_path:
                             u, v = path[i], path[i + 1]
@@ -380,7 +372,6 @@ class NetworkParameters:
                                 self.G.remove_edge(u, v)
 
                     try:
-                        # Find new path from spur node to target
                         spur_path = nx.shortest_path(self.G, spur_node, node2,
                                                      weight='weight')
                         total_path = root_path[:-1] + spur_path
@@ -389,58 +380,39 @@ class NetworkParameters:
                     except nx.NetworkXNoPath:
                         pass
 
-                    # Restore removed edges
                     for u, v, data in removed_edges:
                         self.G.add_edge(u, v, **data)
 
                 if not B:
                     break
 
-                # Add the best candidate to solution
                 new_path = heapq.heappop(B)
                 A.append(new_path)
 
             return A
 
-        # Find paths using Yen's algorithm
         paths = find_yen_k_paths()
 
-        # Write paths to the specified file
+        def map_path(path):
+            mapped = []
+            for node in path:
+                info = self._atom_info(node)
+                mapped.append({
+                    "res_num": info["res_num"],
+                    "chain_id": info["chain_id"],
+                })
+            return mapped
+
+        payload = {
+            "source_residue": source_residue,
+            "target_residue": target_residue,
+            "shortest_path": map_path(paths[0]) if paths else [],
+            "alternative_paths": [map_path(p) for p in paths[1:k + 1]],
+        }
         with open(alt_paths_file, 'w') as f:
-            # Write the shortest path
-            f.write("Shortest Path:")
-            new_path = []  # Initialize a list to hold the shortest path
-            for node in paths[0]:
-                # Map the node to its corresponding residue and chain information
-                res_name0, atom_name0, res_num0, chain_id0 = self.atom_mapping.get(
-                    str(node), ("Unknown", "Unknown", "Unknown", "Unknown"))
-                # Format the node with residue number and chain ID
-                node_new = (res_num0, chain_id0)
-                new_path.append(
-                    node_new)  # Append the formatted node to the new path
+            json.dump(payload, f, indent=2)
 
-            # Write the shortest path to the file
-            f.write(" -> ".join(
-                [f"{res_num}{f', {chain_id}' if chain_id else ''}" for
-                 res_num, chain_id in new_path]) + "\n")
-
-            # Write alternative paths
-            for i, path in enumerate(paths[1:k + 1], start=1):
-                alt_path = []
-                for node in path:
-                    res_name, atom_name, res_num, chain_id = self.atom_mapping.get(
-                        str(node),
-                        ("Unknown", "Unknown", "Unknown", "Unknown"))
-                    alt_path.append((res_num,
-                                     chain_id))  # Append the formatted node to the alternative path
-
-                # Write the alternative path to the file
-                f.write(f"Alternative Path {i}: ")
-                f.write(" -> ".join(
-                    [f"{res_num}{f', {chain_id}' if chain_id else ''}" for
-                     res_num, chain_id in alt_path]) + "\n")
-
-        return paths[:k + 1]  # Return the shortest path and top k alternatives
+        return paths[:k + 1]
 
     def calculate_centralities(self):
         """
@@ -449,31 +421,33 @@ class NetworkParameters:
         Returns:
             tuple: A tuple containing dictionaries for betweenness, closeness, and degree centralities.
         """
-        start_time = time.time()
         betweenness = nx.betweenness_centrality(self.G, weight='weight')
         closeness = nx.closeness_centrality(self.G, distance='weight')
         degree = dict(self.G.degree())
-        end_time = time.time()
         return betweenness, closeness, degree
 
     def save_centrality_measures(self, centralities, output_file):
         """
-        Saves centrality measures to a file.
+        Saves centrality measures to a JSON file.
 
         Args:
             centralities (tuple): A tuple containing dictionaries for betweenness, closeness, and degree centralities.
             output_file (str): Path to the file where centrality measures will be saved.
         """
-        start_time = time.time()
         betweenness, closeness, degree = centralities
+        nodes = []
+        for node in betweenness.keys():
+            info = self._atom_info(node)
+            nodes.append({
+                "node": int(node),
+                "res_num": info["res_num"],
+                "chain_id": info["chain_id"],
+                "betweenness": float(betweenness[node]),
+                "closeness": float(closeness[node]),
+                "degree": int(degree[node]),
+            })
         with open(output_file, 'w') as f:
-            f.write("Node Res_num Chain_ID\tBetweenness\tCloseness\tDegree\n")
-            for node in betweenness.keys():
-                res_name0, atom_name0, res_num0, chain_id0 = self.atom_mapping.get(
-                    str(node), ("Unknown", "Unknown", "Unknown", "Unknown"))
-                f.write(
-                    f"Node ({res_num0},{chain_id0})\t{betweenness[node]:.4f}\t{closeness[node]:.4f}\t{degree[node]}\n")
-        end_time = time.time()
+            json.dump({"nodes": nodes}, f, indent=2)
 
     def calculate_edge_betweenness(self):
         """
@@ -482,35 +456,34 @@ class NetworkParameters:
         Returns:
             dict: A dictionary mapping edges to their betweenness centrality value.
         """
-        start_time = time.time()
         edge_betweenness = nx.edge_betweenness_centrality(self.G,
                                                           weight='weight')
-        end_time = time.time()
         return edge_betweenness
 
     def save_edge_betweenness(self, edge_betweenness, output_file):
         """
-        Saves edge betweenness centrality measures to a file.
+        Saves edge betweenness centrality measures to a JSON file.
 
         Args:
             edge_betweenness (dict): A dictionary mapping edges to their betweenness centrality value.
             output_file (str): Path to the file where edge betweenness centralities will be saved.
         """
-        start_time = time.time()
+        edges = []
+        for edge, centrality in edge_betweenness.items():
+            if self.G.has_edge(*edge):
+                info0 = self._atom_info(edge[0])
+                info1 = self._atom_info(edge[1])
+                edges.append({
+                    "node1": int(edge[0]),
+                    "node2": int(edge[1]),
+                    "res_num1": info0["res_num"],
+                    "chain_id1": info0["chain_id"],
+                    "res_num2": info1["res_num"],
+                    "chain_id2": info1["chain_id"],
+                    "betweenness": float(centrality),
+                })
         with open(output_file, 'w') as f:
-            f.write("Edge\tBetweenness\n")
-            for edge, centrality in edge_betweenness.items():
-                if self.G.has_edge(
-                        *edge):  # Ensure that only edges in the graph are saved
-                    res_name0, atom_name0, res_num0, chain_id0 = self.atom_mapping.get(
-                        str(edge[0]),
-                        ("Unknown", "Unknown", "Unknown", "Unknown"))
-                    res_name1, atom_name1, res_num1, chain_id1 = self.atom_mapping.get(
-                        str(edge[1]),
-                        ("Unknown", "Unknown", "Unknown", "Unknown"))
-                    edge_str = f"({res_num0},{chain_id0})-({res_num1},{chain_id1})"
-                    f.write(f"{edge_str}\t{centrality:.4f}\n")
-        end_time = time.time()
+            json.dump({"edges": edges}, f, indent=2)
 
     def identify_top_10_percent_nodes(self, centralities, output_file):
         """
@@ -523,24 +496,30 @@ class NetworkParameters:
         betweenness, closeness, degree = centralities
         num_nodes = len(betweenness)
         top_n = max(1, num_nodes // 20)
-        # Sorting nodes based on centrality measures
         sorted_betweenness = sorted(betweenness.items(), key=lambda x: x[1],
                                     reverse=True)[:top_n]
         sorted_closeness = sorted(closeness.items(), key=lambda x: x[1],
                                   reverse=True)[:top_n]
         sorted_degree = sorted(degree.items(), key=lambda x: x[1],
                                reverse=True)[:top_n]
-        # Merging all top nodes
         top_nodes = set([node for node, _ in sorted_betweenness] +
                         [node for node, _ in sorted_closeness] +
                         [node for node, _ in sorted_degree])
 
+        nodes_out = []
+        for node in top_nodes:
+            info = self._atom_info(node)
+            nodes_out.append({
+                "node": int(node),
+                "res_num": info["res_num"],
+                "chain_id": info["chain_id"],
+            })
+
         with open(output_file, 'w') as f:
-            f.write("Top 5% Nodes (Allosteric Hotspots):\n")
-            for node in top_nodes:
-                res_name0, atom_name0, res_num0, chain_id0 = self.atom_mapping.get(
-                    str(node), ("Unknown", "Unknown", "Unknown", "Unknown"))
-                f.write(f"Node ({res_num0}, {chain_id0})\n")
+            json.dump({
+                "description": "Top 5% Nodes (Allosteric Hotspots)",
+                "nodes": nodes_out,
+            }, f, indent=2)
 
         print(
             f" 📥  Top 5% nodes identified and saved as allosteric hotspots to {output_file} ")

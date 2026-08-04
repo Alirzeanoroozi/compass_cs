@@ -54,3 +54,6 @@ MANIFEST
 .python-version
 !example/*
 example/sample_output/network/graph_cutoff_5_shortest_paths.txt
+see_pdb.py
+example/Spain_Task/*
+example/SirahRun/*

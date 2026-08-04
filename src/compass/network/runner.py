@@ -112,14 +112,14 @@ def process_graph_files(results_dir):
             network_parameters = NetworkParameters(G=graph, atom_mapping=atom_mapping)
             # Define output file names based on the JSON file prefix
             prefix = filename.replace('.json', '')
-            shortest_paths_file = os.path.join(results_dir, f"{prefix}_shortest_paths.txt")
-            shortest_paths_with_labels_file = os.path.join(results_dir, f"{prefix}_shortest_paths_with_labels.txt")
+            shortest_paths_file = os.path.join(results_dir, f"{prefix}_shortest_paths.json")
+            shortest_paths_with_labels_file = os.path.join(results_dir, f"{prefix}_shortest_paths_with_labels.json")
             heatmap_file = os.path.join(results_dir, f"{prefix}_heatmap.png")
-            centralities_file = os.path.join(results_dir, f"{prefix}_centralities.txt")
-            edge_betweenness_file = os.path.join(results_dir, f"{prefix}_edge_betweenness.txt")
-            top_nodes_file = os.path.join(results_dir, f"{prefix}_top_10_percent_nodes.txt")
-            top_shortest_paths_file = os.path.join(results_dir, f"{prefix}_top_10_shortest_paths.txt")
-            lengths_file = os.path.join(results_dir, f"{prefix}_shortest_path_lengths.txt")
+            centralities_file = os.path.join(results_dir, f"{prefix}_centralities.json")
+            edge_betweenness_file = os.path.join(results_dir, f"{prefix}_edge_betweenness.json")
+            top_nodes_file = os.path.join(results_dir, f"{prefix}_top_10_percent_nodes.json")
+            top_shortest_paths_file = os.path.join(results_dir, f"{prefix}_top_10_shortest_paths.json")
+            lengths_file = os.path.join(results_dir, f"{prefix}_shortest_path_lengths.json")
             shortest_paths = network_parameters.compute_shortest_paths(shortest_paths_file,            # File for all shortest paths
                 top_shortest_paths_file,           # File for the top 10 (or 50) shortest paths
                 num_processes=32)
@@ -164,10 +164,10 @@ def process_graph_files_for_communities_and_cliques(results_dir):
             community_detector = CommunityDetector(G=G)
             # Define output file names based on the JSON file prefix
             prefix = filename.replace('.json', '')
-            cliques_file = os.path.join(results_dir, f"{prefix}_cliques.txt")
+            cliques_file = os.path.join(results_dir, f"{prefix}_cliques.json")
             try:
                 communities_leiden, modularity_leiden = community_detector.detect_communities_leiden()
-                communities_file = os.path.join(results_dir, f"{prefix}_communities_leiden.txt")
+                communities_file = os.path.join(results_dir, f"{prefix}_communities_leiden.json")
                 community_detector.save_communities_to_file(communities_leiden, communities_file)
                 print(f"Communities detected using Leiden algorithm saved to {communities_file}")
             except:
@@ -186,7 +186,7 @@ def process_graph_files_for_communities_and_cliques(results_dir):
             clique_detector = CliqueDetector(G=G)
             # Define output file names based on the JSON file prefix
             prefix = filename.replace('.json', '')
-            cliques_file = os.path.join(results_dir, f"{prefix}_cliques.txt")
+            cliques_file = os.path.join(results_dir, f"{prefix}_cliques.json")
             # Detect cliques
             cliques = clique_detector.detect_cliques()
             clique_detector.save_cliques_to_file(cliques, cliques_file)
@@ -218,16 +218,16 @@ def generate_pymol_scripts(results_dir):
             graph, atom_mapping = rf.ReadFiles().load_graph_and_mapping(json_path)
             
             # Set paths for the corresponding files
-            communities_file = os.path.join(results_dir, f"{prefix}_communities_leiden.txt")
-            cliques_file = os.path.join(results_dir, f"{prefix}_cliques_filtered.txt")
-            centrality_file = os.path.join(results_dir, f"{prefix}_centralities.txt")
-            edge_betweenness_file = os.path.join(results_dir, f"{prefix}_edge_betweenness.txt")
-            top_nodes_file = os.path.join(results_dir, f"{prefix}_top_10_percent_nodes.txt")
-            paths_file = os.path.join(results_dir, f"{prefix}_paths.txt")
+            communities_file = os.path.join(results_dir, f"{prefix}_communities_leiden.json")
+            cliques_file = os.path.join(results_dir, f"{prefix}_cliques_filtered.json")
+            centrality_file = os.path.join(results_dir, f"{prefix}_centralities.json")
+            edge_betweenness_file = os.path.join(results_dir, f"{prefix}_edge_betweenness.json")
+            top_nodes_file = os.path.join(results_dir, f"{prefix}_top_10_percent_nodes.json")
+            paths_file = os.path.join(results_dir, f"{prefix}_paths.json")
             output_pml_file = os.path.join(results_dir, f"{prefix}_top_10.pml")
             output_pml_communities = os.path.join(results_dir, f"{prefix}_communities.pml")
             output_top_paths = os.path.join(results_dir, f"{prefix}_top_paths.pml")
-            top_15_file = os.path.join(results_dir, f"{prefix}_top_10_shortest_paths.txt")
+            top_15_file = os.path.join(results_dir, f"{prefix}_top_10_shortest_paths.json")
             
             # Initialize PyMOLVisualizer
             visualizer = PyMOLVisualizer(pdb_file=pdb_file, atom_mapping=atom_mapping, graph=graph)
@@ -262,7 +262,7 @@ def generate_pymol_scripts(results_dir):
             # Load the graph and atom mapping
             graph, atom_mapping = rf.ReadFiles().load_graph_and_mapping(json_path)
             # Set paths for the corresponding files
-            cliques_file = os.path.join(results_dir, f"{prefix}_cliques_filtered.txt")
+            cliques_file = os.path.join(results_dir, f"{prefix}_cliques_filtered.json")
             output_pml_cliques = os.path.join(results_dir, f"{prefix}_cliques.pml")
             if os.path.exists(cliques_file):
                 visualizer.cliques_pml(atom_mapping,cliques_file,edge_betweenness_file,output_pml_cliques)
