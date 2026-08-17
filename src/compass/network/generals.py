@@ -42,8 +42,8 @@ def process_graphs(param_space, distance_cutoffs):
             distance_cutoff=distance_cutoff,
             atom_mapping=atom_mapping
         )
-        # Ensure graph connectivity
-        G = graph_constructor.ensure_graph_connectivity(G)
+        # # Ensure graph connectivity
+        # G = graph_constructor.ensure_graph_connectivity(G)
         # Define file names based on the distance cutoff
         graph_filename = _graph_json_name(distance_cutoff)
         output_graph_file = os.path.join(param_space.network_dir, graph_filename)
