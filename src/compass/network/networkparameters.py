@@ -1,44 +1,18 @@
 import heapq
 import json
 import time
-
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import seaborn as sns
 
-
 class NetworkParameters:
-    """
-    A class to compute and analyze network parameters, focusing on shortest paths
-    and their visualization through path mapping.
-
-    This implementation uses an efficient sequential algorithm to compute shortest
-    paths between nodes in the network, with special handling for atom/residue mapping
-    in molecular networks.
-
-    Attributes:
-        G (nx.Graph): The network graph object.
-        atom_mapping (dict): Maps node indices to atom information (chain, residue name,
-                           residue number, atom name).
-    """
-
     def __init__(self, G, atom_mapping=None):
-        """
-        Initialize the NetworkParameters class.
-
-        Args:
-            G (nx.Graph): Network graph with weighted edges.
-            atom_mapping (dict, optional): Dictionary mapping node indices to atom information.
-                Expected format: {node_id: (chain, residue_name, residue_number, atom_name)}
-        """
         self.G = G
-        self.atom_mapping = atom_mapping if atom_mapping else {}
+        self.atom_mapping = atom_mapping
 
     def _atom_info(self, node):
-        res_name, atom_name, res_num, chain_id = self.atom_mapping.get(
-            str(node), ("Unknown", "Unknown", "Unknown", "Unknown")
-        )
+        res_name, atom_name, res_num, chain_id = self.atom_mapping.get(str(node), ("Unknown", "Unknown", "Unknown", "Unknown"))
         return {
             "res_name": res_name,
             "atom_name": atom_name,
@@ -55,46 +29,23 @@ class NetworkParameters:
         2. Sorts paths by length
         3. Collects paths until reaching the residue threshold
         4. Saves results to specified files
-
-        Args:
-            all_paths_file (str): Path to save all computed shortest paths
-            top_file (str): Path to save detailed top paths with residue mapping
-
-        Returns:
-            dict: Dictionary of path lengths between node pairs
         """
         nodes = sorted(list(self.G.nodes()))
-
         shortest_paths, path_lengths = self._compute_all_shortest_paths(nodes)
-        collected_paths = self._collect_paths_until_threshold(
-            nodes, shortest_paths, path_lengths
-        )
-        self._save_paths(all_paths_file, top_file, collected_paths,
-                         shortest_paths)
+        collected_paths = self._collect_paths_until_threshold(nodes, shortest_paths, path_lengths)
+        self._save_paths(all_paths_file, shortest_paths)
+        self._write_top_paths_with_mapping(collected_paths, shortest_paths, top_file)
 
         return path_lengths
 
     def _compute_all_shortest_paths(self, nodes):
-        """
-        Compute shortest paths between all node pairs efficiently.
-
-        Uses single_source_dijkstra to compute paths from each source node
-        to all possible targets in one pass, improving performance.
-
-        Args:
-            nodes (list): Sorted list of node indices
-
-        Returns:
-            tuple: (shortest_paths, path_lengths) dictionaries
-        """
         start_time = time.time()
         shortest_paths = {}
         path_lengths = {}
 
         for source in nodes:
             try:
-                distances, paths = nx.single_source_dijkstra(self.G, source,
-                                                             weight='weight')
+                distances, paths = nx.single_source_dijkstra(self.G, source, weight='weight')
                 for target in (n for n in nodes if n > source):
                     if target in paths:
                         shortest_paths[(source, target)] = paths[target]
@@ -103,30 +54,14 @@ class NetworkParameters:
                 continue
 
         end_time = time.time()
-        print(
-            f" 📐  Shortest paths computation completed in {end_time - start_time:.2f} seconds")
+        print(f" 📐  Shortest paths computation completed in {end_time - start_time:.2f} seconds")
         return shortest_paths, path_lengths
 
-    def _collect_paths_until_threshold(self, nodes, shortest_paths,
-                                       path_lengths):
-        """
-        Collect paths until reaching the residue threshold (20% of total residues).
-
-        Args:
-            nodes (list): List of all nodes
-            shortest_paths (dict): Dictionary of shortest paths
-            path_lengths (dict): Dictionary of path lengths
-
-        Returns:
-            list: Collected paths that meet the threshold criterion
-        """
+    def _collect_paths_until_threshold(self, nodes, shortest_paths, path_lengths):
         total_residues = len(nodes)
         residue_threshold = 0.2 * total_residues
 
-        path_list = [
-            (source, target, length)
-            for (source, target), length in path_lengths.items()
-        ]
+        path_list = [(source, target, length) for (source, target), length in path_lengths.items()]
         path_list.sort(key=lambda x: x[2], reverse=True)
 
         collected_paths = []
@@ -145,17 +80,7 @@ class NetworkParameters:
 
         return collected_paths
 
-    def _save_paths(self, all_paths_file, top_file, collected_paths,
-                    shortest_paths):
-        """
-        Save computed paths to JSON output files.
-
-        Args:
-            all_paths_file (str): File to save all collected paths
-            top_file (str): File to save detailed top paths with residue mapping
-            collected_paths (list): List of collected path information
-            shortest_paths (dict): Dictionary of shortest paths
-        """
+    def _save_paths(self, all_paths_file, shortest_paths):
         all_paths = []
         for (source, target), path in shortest_paths.items():
             if not path:
@@ -163,33 +88,13 @@ class NetworkParameters:
             mapped_path = []
             for node in path:
                 info = self._atom_info(node)
-                mapped_path.append({
-                    "res_num": info["res_num"],
-                    "chain_id": info["chain_id"],
-                })
-            all_paths.append({
-                "source": int(source),
-                "target": int(target),
-                "path": [int(n) for n in path],
-                "mapped_path": mapped_path,
-            })
+                mapped_path.append({"res_num": info["res_num"], "chain_id": info["chain_id"]})
+            all_paths.append({"source": int(source), "target": int(target), "path": [int(n) for n in path], "mapped_path": mapped_path})
 
         with open(all_paths_file, 'w') as file:
             json.dump({"paths": all_paths}, file)
 
-        self.write_top_50_shortest_paths_with_mapping(collected_paths,
-                                                      shortest_paths, top_file)
-
-    def write_top_50_shortest_paths_with_mapping(self, top_paths,
-                                                 shortest_paths, top_file):
-        """
-        Write detailed path information including residue mapping as JSON.
-
-        Args:
-            top_paths (list): List of (source, target, length) tuples
-            shortest_paths (dict): Dictionary of shortest paths
-            top_file (str): Output file path
-        """
+    def _write_top_paths_with_mapping(self, top_paths, shortest_paths, top_file):
         unique_top_paths = set()
         paths_out = []
 
@@ -207,52 +112,25 @@ class NetworkParameters:
                 mapped_path = []
                 for node in path:
                     info = self._atom_info(node)
-                    mapped_path.append({
-                        "res_num": info["res_num"],
-                        "res_name": info["res_name"],
-                        "atom_name": info["atom_name"],
-                        "chain_id": info["chain_id"],
-                    })
-                paths_out.append({
-                    "source": int(source),
-                    "target": int(target),
-                    "length": float(length),
-                    "path": [int(n) for n in path],
-                    "mapped_path": mapped_path,
-                })
+                    mapped_path.append({"res_num": info["res_num"], "chain_id": info["chain_id"]})
+                paths_out.append({"source": int(source), "target": int(target), "length": float(length), "path": [int(n) for n in path], "mapped_path": mapped_path})
                 unique_top_paths.add((source, target))
             except Exception as e:
                 print(f"Error processing path {source} -> {target}: {str(e)}")
 
         with open(top_file, 'w') as file:
-            json.dump({
-                "description": "Top shortest paths",
-                "paths": paths_out,
-            }, file, indent=2)
+            json.dump({"description": "Top shortest paths", "paths": paths_out}, file, indent=2)
 
-        print(
-            f" 📥  Top 50 shortest paths with node and residue mapping written to {top_file}")
+        print(f" 📥  Top 50 shortest paths with node and residue mapping written to {top_file}")
 
     def calculate_shortest_path_between_residues(self, residue1, residue2):
-        """
-        Calculates the shortest path between two residues.
-
-        Args:
-            residue1 (str): The first residue node index.
-            residue2 (str): The second residue node index.
-
-        Returns:
-            tuple: The shortest path length and the path as a list of nodes.
-        """
         try:
-            length, path = nx.single_source_dijkstra(self.G, residue1,
-                                                     target=residue2)
+            length, path = nx.single_source_dijkstra(self.G, residue1, target=residue2)
             return length, path
         except nx.NetworkXNoPath:
             return float('inf'), []
 
-    def save_paths_and_create_heatmap(self, shortest_path_lengths,
-                                      heatmap_file, title, cbar_label):
+    def save_paths_and_create_heatmap(self, shortest_path_lengths, heatmap_file, title, cbar_label):
         """
         Creates a heatmap of the shortest paths.
 
@@ -276,16 +154,14 @@ class NetworkParameters:
         vmin = np.min(data_matrix)
         vmax = np.max(data_matrix)
         plt.figure(figsize=(10, 8))
-        sns.heatmap(data_matrix, annot=False, fmt=".2f", cmap="viridis",
-                    cbar_kws={'label': cbar_label}, vmin=vmin, vmax=vmax)
+        sns.heatmap(data_matrix, annot=False, fmt=".2f", cmap="viridis", cbar_kws={'label': cbar_label}, vmin=vmin, vmax=vmax)
         plt.title(title)
         plt.xlabel("Node Index")
         plt.ylabel("Node Index")
         plt.savefig(heatmap_file)
         plt.close()
         end_time = time.time()
-        print(
-            f"Heatmap created and saved in {end_time - start_time:.2f} seconds")
+        print(f"Heatmap created and saved in {end_time - start_time:.2f} seconds")
 
     def generate_paths_chunk(self, start_nodes, source_node, target_node):
         """

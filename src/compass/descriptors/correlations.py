@@ -1,12 +1,6 @@
 # Created by gonzalezroy at 6/24/24
-"""
-Functions related to the calculation of correlations
-"""
 import numpy as np
-from numba import njit
 
-
-@njit(parallel=True, fastmath=True)
 def calculate_mi_and_gc(cov_mat, num_atoms_per_residue):
     """
     Calculate Mutual Information (MI) scores and Generalized Correlation (GC) matrix.
@@ -48,7 +42,6 @@ def calculate_mi_and_gc(cov_mat, num_atoms_per_residue):
 
     return MI_scores, GC_matrix
 
-
 def compute_gc_matrix(corr_coords, num_atoms_per_residue=1):
     """
     Compute the Generalized Correlation (GC) matrix.
@@ -70,7 +63,6 @@ def compute_gc_matrix(corr_coords, num_atoms_per_residue=1):
                                                num_atoms_per_residue)
     # print("calculating generalised correlations here")
     return MI_scores, GC_matrix
-
 
 def compute_cov_matrix_trajectory(coords):
     """

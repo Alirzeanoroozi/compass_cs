@@ -1,29 +1,10 @@
 import random
 import json
 
-from Bio import PDB
-
 from compass.network.read_files import ReadFiles
 
-
 class PyMOLVisualizer:
-    """
-    A class for generating PyMOL scripts to visualize molecular structures and graph properties.
-
-    Attributes:
-        pdb_file (str): Path to the input PDB file.
-        atom_mapping (dict): A dictionary mapping residue indices to their atom information.
-        graph (nx.Graph): The graph object containing nodes and edges.
-    """
-
     def __init__(self, pdb_file, atom_mapping, graph):
-        """
-        Initializes the PyMOLVisualizer with the PDB file, atom mapping, and graph.
-
-        Args:
-            pdb_file (str): Path to the input PDB file.
-            atom_mapping (dict): A dictionary mapping residue indices to their atom information.
-        """
         self.pdb_file = pdb_file
         self.atom_mapping = atom_mapping
         self.graph = graph
@@ -242,8 +223,7 @@ class PyMOLVisualizer:
         print(
             f" 🧊  PyMOL script for graph attributes saved with prefix {output_pml}")
 
-    def highlight_top_nodes_pml(self, pdb_file, atom_mapping, nodes_file,
-                                output_pml_file):
+    def highlight_top_nodes_pml(self, pdb_file, atom_mapping, nodes_file, output_pml_file):
         """
         Generates a PyMOL script to highlight residues corresponding to nodes from a file.
 
@@ -289,8 +269,7 @@ class PyMOLVisualizer:
         except Exception as e:
             print(f"An error occurred: {e}")
 
-    def write_pml_script_for_residue_paths(self, residue_list,
-                                           output_pml_file):
+    def write_pml_script_for_residue_paths(self, residue_list, output_pml_file):
         """
         Generates a PyMOL script to draw lines connecting consecutive residues.
 

@@ -1,54 +1,43 @@
 # Created by gonzalezroy at 6/17/24
-"""
-Functions related to the calculation of geometric descriptor matrices
-"""
 import time
 import numpy as np
 import mdtraj as md
+from numba import njit, prange
 
 import compass.descriptors.correlations as corr
-import compass.descriptors.geometry as geom
+from compass.descriptors.geometry import calc_dist, calc_min_dist, find_hb, find_sb
+
 
 def get_xyz_chunks(trajs, topo, chunk_size=500):
-    """
-    Load chunks of xyz coordinates from a list of trajectories
-
-    Args:
-        trajs: list of trajectories
-        topo: system topology
-        chunk_size: size of the chunk to load
-
-    Returns:
-        chunk.xyz: chunk of xyz coordinates
-    """
     for traj in trajs:
-        chunks = md.iterload(traj, top=topo, chunk=chunk_size)
-        for chunk in chunks:
+        for chunk in md.iterload(traj, top=topo, chunk=chunk_size):
             yield chunk.xyz
 
-def compute_descriptors(mini_traj, trajs, arg, resids_to_atoms, resids_to_noh, calphas, oxy, nitro, donors, hydros, acceptors, corr_indices, first_timer):
-    """
-    Compute the compass descriptors for the trajectory
+def _pad_index_map(index_map, n_resids):
+    """Pad a residue -> atom-index map into (n_resids, max_len) arrays for Numba."""
+    rows = []
+    max_len = 1
+    for i in range(n_resids):
+        vals = index_map[i] if i in index_map else ()
+        arr = np.asarray(vals, dtype=np.int32).reshape(-1)
+        if arr.size > max_len:
+            max_len = arr.size
+        rows.append(arr)
+    padded = np.full((n_resids, max_len), -1, dtype=np.int32)
+    counts = np.zeros(n_resids, dtype=np.int32)
+    for i, arr in enumerate(rows):
+        counts[i] = arr.size
+        if arr.size:
+            padded[i, :arr.size] = arr
+    return padded, counts
 
-    Args:
-        mini_traj: first frame of the trajectory
-        trajs: trajectory or list of trajectories
-        arg: namespace containing the arguments
-        resids_to_atoms: mapping of residues indices to the atoms indices
-        resids_to_noh: mapping of residues indices to the noh atoms indices
-        calphas: indices of the calpha atoms
-        oxy: indices of the oxygen atoms
-        nitro: indices of the nitrogen atoms
-        donors: indices of the donor atoms
-        hydros: indices of the hydrogen atoms
-        acceptors: indices of the acceptor atoms
-        corr_indices: indices of the atoms to compute the correlation matrices
-         (calpha for protein and c5' for nucleic acids)
-        first_timer: first time stamp
+def _calpha_index_array(calphas, n_resids):
+    ca_idx = np.empty(n_resids, dtype=np.int32)
+    for i in range(n_resids):
+        ca_idx[i] = calphas[i]
+    return ca_idx
 
-    Returns:
-
-    """
+def compute_descriptors(arg, resids_to_atoms, resids_to_noh, atoms_to_resids, calphas, oxy, nitro, donors, hydros, acceptors, first_timer):
     # Initialize containers
     n_resids = len(resids_to_atoms)
     n_pairs = int(n_resids * (n_resids - 1) / 2)
@@ -59,16 +48,22 @@ def compute_descriptors(mini_traj, trajs, arg, resids_to_atoms, resids_to_noh, c
     pair_hb_sum = np.zeros(n_pairs) # hydrogen bonds between every pair of residues
     pair_int_sum = np.zeros(n_pairs) # interactions between every pair of residues
 
-    # Compile numba function
-    get_chunk_info(mini_traj.xyz, resids_to_atoms, resids_to_noh, arg.nb_cut, arg.sb_cut, arg.da_cut, arg.ha_cut, arg.dha_cut, calphas, oxy, nitro, donors, hydros, acceptors)
-
-    comp_time = round(time.time() - first_timer, 2)
-    print(f" ⏱️  Until compilation of descriptors-related functions: {comp_time} s")
+    ca_idx = _calpha_index_array(calphas, n_resids)
+    noh_idx, noh_n = _pad_index_map(resids_to_noh, n_resids)
+    oxy_idx, oxy_n = _pad_index_map(oxy, n_resids)
+    nitro_idx, nitro_n = _pad_index_map(nitro, n_resids)
+    donors_idx, donors_n = _pad_index_map(donors, n_resids)
+    hydros_idx, hydros_n = _pad_index_map(hydros, n_resids)
+    acceptors_idx, acceptors_n = _pad_index_map(acceptors, n_resids)
 
     n_frames = 0
-    for chunk in get_xyz_chunks(trajs, arg.topo, chunk_size=100):
-        n_frames += chunk.shape[0]
-        pair_min_dist, pair_cp, pair_nb, pair_sb, pair_hb, pair_int = get_chunk_info(chunk, resids_to_atoms, resids_to_noh, arg.nb_cut, arg.sb_cut, arg.da_cut, arg.ha_cut, arg.dha_cut, calphas, oxy, nitro, donors, hydros, acceptors)
+    for chunk in get_xyz_chunks(arg.traj.split(), arg.topo, chunk_size=1):
+        n_frames += 1
+        frame = np.ascontiguousarray(chunk[0])
+        pair_min_dist, pair_cp, pair_nb, pair_sb, pair_hb, pair_int = get_frame_info(
+            frame, noh_idx, noh_n, ca_idx, arg.nb_cut, arg.sb_cut, arg.da_cut,
+            arg.ha_cut, arg.dha_cut, oxy_idx, oxy_n, nitro_idx, nitro_n,
+            donors_idx, donors_n, hydros_idx, hydros_n, acceptors_idx, acceptors_n)
         pair_min_dist_sum += pair_min_dist
         pair_cp_sum += pair_cp
         pair_nb_sum += pair_nb
@@ -86,154 +81,53 @@ def compute_descriptors(mini_traj, trajs, arg, resids_to_atoms, resids_to_noh, c
 
     # Do a 2nd pass to compute cp & extract coords for correlation matrices
     pair_cp_sum2 = np.zeros(n_pairs)
-    chunks = get_xyz_chunks(trajs, arg.topo, chunk_size=100)
-    corr_coords = np.zeros((n_frames, len(corr_indices), 3))
+    corr_coords = np.zeros((n_frames, n_resids, 3))
 
-    k = 0
-    get_chunk_cp(mini_traj.xyz, resids_to_atoms, ave_pair_cp, calphas)
-    for chunk in chunks:
-        # Compute CP
-        pair_cp2 = get_chunk_cp(chunk, resids_to_atoms, ave_pair_cp, calphas)
+    n_frames = 0
+    for chunk in get_xyz_chunks(arg.traj.split(), arg.topo, chunk_size=1):
+        n_frames += 1
+        frame = np.ascontiguousarray(chunk[0])
+        pair_cp2 = get_chunk_cp(frame, ca_idx, ave_pair_cp)
         pair_cp_sum2 += pair_cp2
 
         # Get correlation coordinates
-        corr_chunk = chunk[:, corr_indices]
-        corr_coords[k: k + corr_chunk.shape[0], :] = corr_chunk
-        k += corr_chunk.shape[0]
-    cp = pair_cp_sum2 / n_frames * 100
-
+        corr_coords[n_frames - 1, :] = frame[ca_idx]
+    
+    # Compute Communication Propensity
+    cp = (pair_cp_sum2 / n_frames) * 100
+    cp = abs(cp - max(cp))  # Invert CP matrix
+    
     # Compute MI & GC
     mi, gc = corr.compute_gc_matrix(corr_coords, num_atoms_per_residue=3)
 
     running_time = round(time.time() - first_timer, 2)
     print(f" 📋 System details: number of frames are {n_frames}")
     print(f" ⏱️  Until descriptors computed: {running_time} s")
+
     return ave_min_dist, occ_nb, cp, occ_sb, occ_hb, occ_int, mi, gc
 
-def get_chunk_info(traj_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut, da_cut, ha_cut, dha_cut, calphas, oxy, nitro, donors, hydros, acceptors):
-    """
-    Get the minimum distance between every pair of residues averaged along
-    the trajectory
+@njit(parallel=True, fastmath=True, cache=True)
+def get_chunk_cp(traj_coords, ca_idx, ave_pair_cp):
+    n_resids = ca_idx.shape[0]
+    n_pairs = n_resids * (n_resids - 1) // 2
+    triangle = np.zeros(n_pairs)
 
-    Args:
-        traj_coords: xyz coordinates of the trajectory
-        resids_to_atoms: dict mapping residues indices to the atoms indices
-        resids_to_noh: dict mapping residues indices to the noh atoms indices
-        nb_cut: distance cutoff for non-bonded contacts calculation
-        sb_cut: distance cutoff for salt bridges calculation
-        da_cut: distance cutoff for DA in hydrogen bonds calculation
-        ha_cut: distance cutoff for HA in hydrogen bonds calculation
-        dha_cut: angle cutoff for DHA in hydrogen bonds calculation
-        calphas: dict mapping residues indices to their calpha atoms indices
-        oxy: dict mapping residues indices to their oxygen atoms indices
-        nitro: dict mapping residues indices to their nitrogen atoms indices
-        donors: dict mapping residues indices to the donor atoms indices
-        hydros: dict mapping residues indices to the hydrogen atoms indices
-        acceptors: dict mapping residues indices to the acceptor atoms indices
+    for i in prange(n_resids):
+        calpha_i = traj_coords[ca_idx[i]]
+        base = i * n_resids - i * (i + 1) // 2
+        for j in range(i + 1, n_resids):
+            index = base + (j - i - 1)
+            triangle[index] = calc_dist(calpha_i, traj_coords[ca_idx[j]])
+    return (triangle - ave_pair_cp) ** 2
 
-    Returns:
-        ave_pair_min_dist: average along the trajectory of the minimum distance
-                           between every pair of residues
-        percent_nb: percent of non-bonded contacts occupancy between every
-                         pair of residues
-    """
-    # Constants
-    n_resids = len(resids_to_atoms)
-    n_pairs = int(n_resids * (n_resids - 1) / 2)
-    n_frames = len(traj_coords)
+@njit(parallel=True, fastmath=True, cache=True)
+def get_frame_info(frame_coords, noh_idx, noh_n, ca_idx, nb_cut, sb_cut, da_cut,
+                   ha_cut, dha_cut, oxy_idx, oxy_n, nitro_idx, nitro_n,
+                   donors_idx, donors_n, hydros_idx, hydros_n,
+                   acceptors_idx, acceptors_n):
+    n_resids = noh_n.shape[0]
+    n_pairs = n_resids * (n_resids - 1) // 2
 
-    # Initialize containers
-    pair_min_dist_sum = np.zeros(n_pairs)
-    pair_cp_sum = np.zeros(n_pairs)
-    pair_nb_sum = np.zeros(n_pairs)
-    pair_sb_sum = np.zeros(n_pairs)
-    pair_hb_sum = np.zeros(n_pairs)
-    pair_int_sum = np.zeros(n_pairs)
-    # print(f" 📋 System details: Number of frames are {n_frames}, number of backbone atoms are {n_resids}")
-    # Compute all interactions for each frame in parallel
-    for frame in range(n_frames):
-        frame_coords = traj_coords[frame]
-        pair_min_dists, pair_nb, pair_cp, pair_sb, pair_hb, pair_int = get_frame_info(frame_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut, da_cut, ha_cut, dha_cut, calphas, oxy, nitro, donors, hydros, acceptors)
-        # Uptade the sum of interactions
-        pair_min_dist_sum += pair_min_dists
-        pair_cp_sum += pair_cp
-        pair_nb_sum += pair_nb
-        pair_sb_sum += pair_sb
-        pair_hb_sum += pair_hb
-        pair_int_sum += pair_int
-    return pair_min_dist_sum, pair_cp_sum, pair_nb_sum, pair_sb_sum, pair_hb_sum, pair_int_sum
-
-def get_chunk_cp(traj_coords, resids_to_atoms, pair_cp_sum, calphas):
-    """
-    Get the minimum distance between every pair of residues averaged along
-    the trajectory
-
-    Args:
-        traj_coords: xyz coordinates of the trajectory
-        resids_to_atoms: dict mapping residues indices to the atoms indices
-        calphas: dict mapping residues indices to their calpha atoms indices
-        pair_cp_sum: pairwise sum of the distances between calpha atoms
-
-    Returns:
-        ave_pair_min_dist: average along the trajectory of the minimum distance
-                           between every pair of residues
-        percent_nb: percent of non-bonded contacts occupancy between every
-                         pair of residues
-    """
-    # Constants
-    n_resids = len(resids_to_atoms)
-    n_pairs = int(n_resids * (n_resids - 1) / 2)
-    n_frames = len(traj_coords)
-
-    # Get the cp in a second pass to avoid RAM issues
-    ave_pair_cp = pair_cp_sum / n_frames
-    cp_values = np.zeros(n_pairs)
-    for frame in range(n_frames):
-        k = 0
-        triangle = np.zeros(n_pairs, dtype=float)
-        frame_coords = traj_coords[frame]
-
-        for i in range(n_resids):
-            calpha_i = frame_coords[calphas[i]]
-            for j in range(i + 1, n_resids):
-                calpha_j = frame_coords[calphas[j]]
-                d_ij = geom.calc_dist(calpha_i, calpha_j)
-                triangle[k] = d_ij
-                k += 1
-        cp_values += (triangle - ave_pair_cp) ** 2
-    return cp_values
-
-def get_frame_info(frame_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut, da_cut, ha_cut, dha_cut, calphas, oxy, nitro, donors, hydros, acceptors):
-    """
-    Args:
-        frame_coords: xyz coordinates of the frame
-        resids_to_atoms: dict mapping residues indices to the atoms indices
-        resids_to_noh: dict mapping residues indices to the noh atoms indices
-        nb_cut: distance cutoff for non-bonded contacts calculation
-        sb_cut: distance cutoff for salt bridges calculation
-        da_cut: distance cutoff for DA in hydrogen bonds calculation
-        ha_cut: distance cutoff for HA in hydrogen bonds calculation
-        dha_cut: angle cutoff for DHA in hydrogen bonds calculation
-        calphas: dict mapping residues indices to their calpha atoms indices
-        oxy: dict mapping residues indices to their oxygen atoms indices
-        nitro: dict mapping residues indices to their nitrogen atoms indices
-        donors: dict mapping residues indices to the donor atoms indices
-        hydros: dict mapping residues indices to the hydrogen atoms indices
-        acceptors: dict mapping residues indices to the acceptor atoms indices
-
-    Returns:
-        pair_min_dists: minimum distance between every pair of residues
-        pair_nb: non-bonded contacts between every pair of residues
-        pair_cp: distance between calpha atoms of every pair of residues
-        pair_sb: salt bridges between every pair of residues
-        pair_hb: hydrogen bonds between every pair of residues
-        pair_int: interactions between every pair of residues
-    """
-    # Constants
-    n_resids = len(resids_to_atoms)
-    n_pairs = int(n_resids * (n_resids - 1) / 2)
-
-    # Initialize containers
     pair_min_dists = np.zeros(n_pairs)
     pair_nb = np.zeros(n_pairs)
     pair_cp = np.zeros(n_pairs)
@@ -241,66 +135,47 @@ def get_frame_info(frame_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut,
     pair_hb = np.zeros(n_pairs)
     pair_int = np.zeros(n_pairs)
 
-    # Get min dist for all residues in frame
-    index = 0
-    for i in range(n_resids):
-        coords_i = frame_coords[resids_to_noh[i]]
-        calpha_i = frame_coords[calphas[i]]
+    for i in prange(n_resids):
+        coords_i = frame_coords[noh_idx[i, :noh_n[i]]]
+        calpha_i = frame_coords[ca_idx[i]]
+        base = i * n_resids - i * (i + 1) // 2
         for j in range(i + 1, n_resids):
-            coords_j = frame_coords[resids_to_noh[j]]
-            calpha_j = frame_coords[calphas[j]]
+            index = base + (j - i - 1)
+            coords_j = frame_coords[noh_idx[j, :noh_n[j]]]
+            calpha_j = frame_coords[ca_idx[j]]
 
-            # MINDIST: Get min distance between residues i and j
-            min_dist = geom.calc_min_dist(coords_i, coords_j)
+            min_dist = calc_min_dist(coords_i, coords_j)
             pair_min_dists[index] = min_dist
+            pair_nb[index] = 1.0 if min_dist < nb_cut else 0.0
+            pair_cp[index] = calc_dist(calpha_i, calpha_j)
 
-            # NONBOND: Get one non-bonded contact between residues i and j
-            if min_dist < nb_cut:
-                pair_nb[index] = 1
-
-            # COMMPROP: Get the distance between calpha atoms
-            dist_calpha = geom.calc_dist(calpha_i, calpha_j)
-            pair_cp[index] = dist_calpha
-
-            # SALTBRIDGES: Get one salt bridge between residues i and j
             sb = 0
             if (min_dist < sb_cut) and (i + 1 != j):
-                # Direct case
-                oxy_i = oxy[i]
-                nitro_j = nitro[j]
-                if (oxy_i is not None) and (nitro_j is not None):
-                    sb += geom.find_sb(frame_coords, oxy_i, nitro_j, sb_cut)
-
-                # Inverse case
-                oxy_j = oxy[j]
-                nitro_i = nitro[i]
-                if (oxy_j is not None) and (nitro_i is not None):
-                    sb += geom.find_sb(frame_coords, oxy_j, nitro_i, sb_cut)
+                if (oxy_n[i] > 0) and (nitro_n[j] > 0):
+                    sb += find_sb(frame_coords, oxy_idx[i, :oxy_n[i]],
+                                  nitro_idx[j, :nitro_n[j]], sb_cut)
+                if (oxy_n[j] > 0) and (nitro_n[i] > 0):
+                    sb += find_sb(frame_coords, oxy_idx[j, :oxy_n[j]],
+                                  nitro_idx[i, :nitro_n[i]], sb_cut)
             if sb:
-                pair_sb[index] = 1
+                pair_sb[index] = 1.0
 
-            # HBONDS: Get one hydrogen bond between residues i and j
             hb = 0
             if min_dist <= da_cut:
-                # Direct case
-                donors_i = donors[i]
-                hydros_i = hydros[i]
-                acceptors_j = acceptors[j]
-                if (donors_i is not None) and (acceptors_j is not None):
-                    hb += geom.find_hb(frame_coords, donors_i, hydros_i, acceptors_j, da_cut, ha_cut, dha_cut)
-
-                # Inverse case
-                donors_j = donors[j]
-                hydros_j = hydros[j]
-                acceptors_i = acceptors[i]
-                if (donors_j is not None) and (acceptors_i is not None):
-                    hb += geom.find_hb(frame_coords, donors_j, hydros_j, acceptors_i, da_cut, ha_cut, dha_cut)
+                if (donors_n[i] > 0) and (acceptors_n[j] > 0):
+                    hb += find_hb(frame_coords, donors_idx[i, :donors_n[i]],
+                                  hydros_idx[i, :hydros_n[i]],
+                                  acceptors_idx[j, :acceptors_n[j]],
+                                  da_cut, ha_cut, dha_cut)
+                if (donors_n[j] > 0) and (acceptors_n[i] > 0):
+                    hb += find_hb(frame_coords, donors_idx[j, :donors_n[j]],
+                                  hydros_idx[j, :hydros_n[j]],
+                                  acceptors_idx[i, :acceptors_n[i]],
+                                  da_cut, ha_cut, dha_cut)
             if hb:
-                pair_hb[index] = 1
+                pair_hb[index] = 1.0
 
-            # INTERACTIONS: Get one interaction between residues i and j
             if sb or hb:
-                pair_int[index] = 1
+                pair_int[index] = 1.0
 
-            index += 1
     return pair_min_dists, pair_nb, pair_cp, pair_sb, pair_hb, pair_int

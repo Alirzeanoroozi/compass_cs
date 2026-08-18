@@ -1,14 +1,11 @@
 # Created by gonzalezroy at 6/26/24
 import time
-
 import numpy as np
-from numba import njit, prange
 from numpy import concatenate as concat
 from scipy.sparse import lil_matrix
 from sklearn.decomposition import PCA
 
 from compass.descriptors import geometry as geom
-
 
 def reshape_matrices(matrices):
     """
@@ -31,7 +28,6 @@ def reshape_matrices(matrices):
     data = concat(flatened, axis=1)
     return data
 
-
 def perform_pca(data):
     """
     Perform PCA on the data
@@ -43,16 +39,9 @@ def perform_pca(data):
         pca_result: PCA result
     """
     pca = PCA(n_components=2)
-    # concatenated_data = np.concatenate(data, axis=0)
-    # scaler = StandardScaler()
-    # standardized_data = scaler.fit_transform(data)
-    # pca_result = pca.fit_transform(data)
     pca_result = pca.fit_transform(data)
-    # print(pca_result)
     return pca_result
 
-
-@njit(parallel=True)
 def calc_chunk_distances(chunk_i, chunk_j, threshold):
     """
     Calculate the distances between two chunks of data where:
@@ -70,15 +59,14 @@ def calc_chunk_distances(chunk_i, chunk_j, threshold):
     """
     m, n = chunk_i.shape[0], chunk_j.shape[0]
     distances = np.zeros((m, n))
-    for x in prange(m):
-        for y in prange(n):
+    for x in range(m):
+        for y in range(n):
             dist = np.linalg.norm(chunk_i[x] - chunk_j[y])
             # Only store distances above threshold
             # This ensures distant points get larger values
             if dist > threshold:
                 distances[x, y] = dist
     return distances
-
 
 def calc_adjacency_matrix(pca_result, threshold=0.3, chunk_size=100):
     """
@@ -115,7 +103,6 @@ def calc_adjacency_matrix(pca_result, threshold=0.3, chunk_size=100):
 
     return adjacency_matrix
 
-
 def run_pca(arg, matrices, n, first_timer):
     """
     Perform PCA on the selected matrices
@@ -135,16 +122,7 @@ def run_pca(arg, matrices, n, first_timer):
 
     data = reshape_matrices(matrices)
     del matrices
-    '''
-    #checking the inverse of cp
-    print("started plotting cp")
-    sns.heatmap(cp_mat, cmap='viridis', cbar=True)
-    plt.title('Heatmap of cp_mat')
 
-    # Show the plot
-    plt.tight_layout()
-    plt.savefig("plot_cp.png")
-    '''
     # Perform PCA & generate adjacency matrix
     pca_result = perform_pca(data)
     del data
@@ -160,12 +138,3 @@ def run_pca(arg, matrices, n, first_timer):
     pca_time = round(time.time() - first_timer, 2)
     print(f" ⏱️  Until PCA & Adjacency matrix computing: {pca_time} s")
     return adj_name
-
-# =============================================================================
-# Debugging area
-# =============================================================================
-# matrices = []
-# data = reshape_matrices(matrices)
-# del matrices
-# pca_result = perform_pca(data)
-# adjacency_matrix = calc_adjacency_matrix(pca_result)

@@ -4,50 +4,27 @@ import networkx as nx
 import numpy as np
 import pandas as pd
 
+from compass.descriptors.topo_traj import select_backbone_atoms
 
 class ReadFiles:
-    """
-    A class to handle reading and parsing of files for network analysis, including matrices, structures, and centrality values.
-    """
-
     def read_matrix(self, file_path):
-        """
-        Reads a matrix from a .txt file.
-
-        Args:
-            file_path (str): Path to the matrix file.
-
-        Returns:
-            np.ndarray: The matrix read from the file.
-        """
         return np.loadtxt(file_path)
 
     def atom_mapping(self, file_path):
-        """
-        Extracts CA atoms for amino acids and P or O5' atoms for nucleic acids from a topology.
-
-        Returns:
-            tuple: A tuple containing:
-                - atom_mapping (dict): Mapping of atom indices to atom information.
-                - atoms (list): List of atom tuples (residue name, atom name, residue id, chain id).
-        """
-        # Load the PDB file using MDTraj
         trajectory = md.load(file_path)
         topology = trajectory.topology
 
-        from compass.descriptors.topo_traj import select_backbone_atoms
-        all_atoms = select_backbone_atoms(topology)
+        backbone_atoms = select_backbone_atoms(topology)
 
-        atom_mapping = {}  # Maps node index to atom information
+        atom_mapping = {}
         atoms = []
         index_counter = 0
 
         amino_acid_count = 0
         nucleic_acid_count = 0
 
-        # Process selected atoms to build atom_mapping
-        for atom_index in all_atoms:
-            atom = topology.atom(int(atom_index))
+        for atom_index in backbone_atoms:
+            atom = topology.atom(atom_index)
             residue = atom.residue
             chain_id = residue.chain.chain_id if residue.chain.chain_id is not None else ''
             residue_name = residue.name
@@ -60,8 +37,7 @@ class ReadFiles:
                 nucleic_acid_count += 1
 
             atoms.append((residue_name, atom_name, residue_id, chain_id))
-            atom_mapping[index_counter] = (
-            residue_name, atom_name, residue_id, chain_id)
+            atom_mapping[index_counter] = (residue_name, atom_name, residue_id, chain_id)
             index_counter += 1
 
         print(f" 🔍  Processing matrices for graph construction")
@@ -71,34 +47,7 @@ class ReadFiles:
         print(f" 🕸️  Graph network construction is complete.")
         return atom_mapping, atoms
 
-    def parse_mapping(atom_mapping):
-        """
-        Parses atom mapping to extract residues information.
-
-        Args:
-            atom_mapping (dict): A dictionary mapping atom indices to atom information.
-
-        Returns:
-            list: A list of tuples (chain_id, res_num, atom_name).
-        """
-        residues = []
-        for index, (
-        res_name, atom_name, res_num, chain_id) in atom_mapping.items():
-            residues.append((chain_id, res_num, atom_name))
-        return residues
-
     def load_graph_and_mapping(self, input_file):
-        """
-        Loads the graph and atom mapping from a JSON file.
-
-        Args:
-            input_file (str): Path to the JSON file containing the graph and atom mapping.
-
-        Returns:
-            tuple: A tuple containing:
-                - G (nx.Graph): The loaded graph.
-                - atom_mapping (dict): The loaded atom mapping.
-        """
         with open(input_file, 'r') as f:
             data = json.load(f)
 

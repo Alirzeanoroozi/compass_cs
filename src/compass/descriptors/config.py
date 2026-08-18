@@ -5,48 +5,25 @@ from argparse import Namespace
 from os.path import dirname, join, normpath
 
 allowed_params = {
-    "generals": {"topology", "trajectory", "output_dir", "n_cores",
-                 "job_name"},
+    "generals": {"topology", "trajectory", "output_dir", "job_name"},
     "non_bond": {"non_bond_cut"},
     "salt_bridges": {"NO_cut"},
     "hbonds": {"DA_cut", "HA_cut", "DHA_cut", "heavy"},
-    # "network": {"mindist_matrix", "adjacency_matrix"},
     "distance cutoffs": {"Graph", "Cliques"},
     "paths": {"find_path", "sources", "targets"}
 }
 
 allowed_heavies = {"S", "N", "O"}
 
-
 def read_config_file(config_path):
-    """
-    Read configuration file using argparse
-
-    Args:
-        config_path: path to the config file
-
-    Returns:
-        config_obj: configparser read object
-    """
     if not os.path.exists(config_path):
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
-    config_obj = configparser.ConfigParser(allow_no_value=True,
-                                           inline_comment_prefixes="#")
+    config_obj = configparser.ConfigParser(allow_no_value=True, inline_comment_prefixes="#")
     config_obj.optionxform = str
     config_obj.read(config_path)
     return config_obj
 
-
 def check_config(config_obj):
-    """
-    Check sections and values of a given configuration file
-
-    Args:
-        config_obj: configparser read object
-
-    Returns:
-        config_dict: a dict of raw parameters as specified in the config file
-    """
     read_sections = set(config_obj.sections())
     allowed_sections = set(allowed_params.keys())
     sections_equals = read_sections == allowed_sections
@@ -78,29 +55,15 @@ def check_config(config_obj):
 
     return config_dict
 
-
 def parse_params(config_path):
-    """
-    Parse parameters contained in a configuration file
-
-    Args:
-        config_path: path to the config file
-
-    Returns:
-        param_space: argparse Namespace
-    """
     config_obj = read_config_file(config_path)
     param_dict = check_config(config_obj)
     param_space = Namespace()
     root_dir = dirname(config_path)
 
     # General params
-    # param_space.topo = param_dict["generals"]["topology"]
-    topology = param_dict["generals"]["topology"]
-    out_dir = param_dict["generals"]["output_dir"]
-    param_space.out_dir = normpath(join(root_dir, out_dir))
-    param_space.topo = normpath(join(root_dir, topology))
-    param_space.n_cores = int(param_dict["generals"]["n_cores"])
+    param_space.out_dir = normpath(join(root_dir, param_dict["generals"]["output_dir"]))
+    param_space.topo = normpath(join(root_dir, param_dict["generals"]["topology"]))
     param_space.title = param_dict["generals"]["job_name"]
 
     # Descriptor params
@@ -139,4 +102,4 @@ def parse_params(config_path):
     if not os.path.exists(param_space.out_dir):
         os.makedirs(param_space.out_dir, exist_ok=True)
 
-    return param_space, param_dict
+    return param_space
