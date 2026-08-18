@@ -4,12 +4,27 @@ Functions related to the calculation of geometric descriptor matrices
 """
 import time
 import numpy as np
-from numba import njit, prange
+import mdtraj as md
 
 import compass.descriptors.correlations as corr
 import compass.descriptors.geometry as geom
-import compass.descriptors.topo_traj as tt
 
+def get_xyz_chunks(trajs, topo, chunk_size=500):
+    """
+    Load chunks of xyz coordinates from a list of trajectories
+
+    Args:
+        trajs: list of trajectories
+        topo: system topology
+        chunk_size: size of the chunk to load
+
+    Returns:
+        chunk.xyz: chunk of xyz coordinates
+    """
+    for traj in trajs:
+        chunks = md.iterload(traj, top=topo, chunk=chunk_size)
+        for chunk in chunks:
+            yield chunk.xyz
 
 def compute_descriptors(mini_traj, trajs, arg, resids_to_atoms, resids_to_noh, calphas, oxy, nitro, donors, hydros, acceptors, corr_indices, first_timer):
     """
@@ -37,12 +52,12 @@ def compute_descriptors(mini_traj, trajs, arg, resids_to_atoms, resids_to_noh, c
     # Initialize containers
     n_resids = len(resids_to_atoms)
     n_pairs = int(n_resids * (n_resids - 1) / 2)
-    pair_min_dist_sum = np.zeros(n_pairs)
-    pair_cp_sum = np.zeros(n_pairs)
-    pair_nb_sum = np.zeros(n_pairs)
-    pair_sb_sum = np.zeros(n_pairs)
-    pair_hb_sum = np.zeros(n_pairs)
-    pair_int_sum = np.zeros(n_pairs)
+    pair_min_dist_sum = np.zeros(n_pairs) # minimum distance between every pair of residues
+    pair_cp_sum = np.zeros(n_pairs) # distance between calpha atoms of every pair of residues
+    pair_nb_sum = np.zeros(n_pairs) # non-bonded contacts between every pair of residues
+    pair_sb_sum = np.zeros(n_pairs) # salt bridges between every pair of residues
+    pair_hb_sum = np.zeros(n_pairs) # hydrogen bonds between every pair of residues
+    pair_int_sum = np.zeros(n_pairs) # interactions between every pair of residues
 
     # Compile numba function
     get_chunk_info(mini_traj.xyz, resids_to_atoms, resids_to_noh, arg.nb_cut, arg.sb_cut, arg.da_cut, arg.ha_cut, arg.dha_cut, calphas, oxy, nitro, donors, hydros, acceptors)
@@ -50,11 +65,8 @@ def compute_descriptors(mini_traj, trajs, arg, resids_to_atoms, resids_to_noh, c
     comp_time = round(time.time() - first_timer, 2)
     print(f" ⏱️  Until compilation of descriptors-related functions: {comp_time} s")
 
-    # Do a first pass to compute most descriptors
-    chunks = tt.get_xyz_chunks(trajs, arg.topo, chunk_size=100)
-    # print(np.shape(trajs))
     n_frames = 0
-    for chunk in chunks:
+    for chunk in get_xyz_chunks(trajs, arg.topo, chunk_size=100):
         n_frames += chunk.shape[0]
         pair_min_dist, pair_cp, pair_nb, pair_sb, pair_hb, pair_int = get_chunk_info(chunk, resids_to_atoms, resids_to_noh, arg.nb_cut, arg.sb_cut, arg.da_cut, arg.ha_cut, arg.dha_cut, calphas, oxy, nitro, donors, hydros, acceptors)
         pair_min_dist_sum += pair_min_dist
@@ -65,7 +77,7 @@ def compute_descriptors(mini_traj, trajs, arg, resids_to_atoms, resids_to_noh, c
         pair_int_sum += pair_int
 
     # Compute average values
-    ave_min_dist = (pair_min_dist_sum / n_frames) * 10
+    ave_min_dist = (pair_min_dist_sum / n_frames) * 10 # convert to nanometers
     ave_pair_cp = pair_cp_sum / n_frames
     occ_nb = pair_nb_sum / n_frames
     occ_sb = pair_sb_sum / n_frames
@@ -74,7 +86,7 @@ def compute_descriptors(mini_traj, trajs, arg, resids_to_atoms, resids_to_noh, c
 
     # Do a 2nd pass to compute cp & extract coords for correlation matrices
     pair_cp_sum2 = np.zeros(n_pairs)
-    chunks = tt.get_xyz_chunks(trajs, arg.topo, chunk_size=100)
+    chunks = get_xyz_chunks(trajs, arg.topo, chunk_size=100)
     corr_coords = np.zeros((n_frames, len(corr_indices), 3))
 
     k = 0
@@ -98,7 +110,6 @@ def compute_descriptors(mini_traj, trajs, arg, resids_to_atoms, resids_to_noh, c
     print(f" ⏱️  Until descriptors computed: {running_time} s")
     return ave_min_dist, occ_nb, cp, occ_sb, occ_hb, occ_int, mi, gc
 
-@njit(parallel=True)
 def get_chunk_info(traj_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut, da_cut, ha_cut, dha_cut, calphas, oxy, nitro, donors, hydros, acceptors):
     """
     Get the minimum distance between every pair of residues averaged along
@@ -140,7 +151,7 @@ def get_chunk_info(traj_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut, 
     pair_int_sum = np.zeros(n_pairs)
     # print(f" 📋 System details: Number of frames are {n_frames}, number of backbone atoms are {n_resids}")
     # Compute all interactions for each frame in parallel
-    for frame in prange(n_frames):
+    for frame in range(n_frames):
         frame_coords = traj_coords[frame]
         pair_min_dists, pair_nb, pair_cp, pair_sb, pair_hb, pair_int = get_frame_info(frame_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut, da_cut, ha_cut, dha_cut, calphas, oxy, nitro, donors, hydros, acceptors)
         # Uptade the sum of interactions
@@ -152,8 +163,6 @@ def get_chunk_info(traj_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut, 
         pair_int_sum += pair_int
     return pair_min_dist_sum, pair_cp_sum, pair_nb_sum, pair_sb_sum, pair_hb_sum, pair_int_sum
 
-
-@njit(parallel=True)
 def get_chunk_cp(traj_coords, resids_to_atoms, pair_cp_sum, calphas):
     """
     Get the minimum distance between every pair of residues averaged along
@@ -175,12 +184,11 @@ def get_chunk_cp(traj_coords, resids_to_atoms, pair_cp_sum, calphas):
     n_resids = len(resids_to_atoms)
     n_pairs = int(n_resids * (n_resids - 1) / 2)
     n_frames = len(traj_coords)
-    # print(n_resids, n_pairs, n_frames, "get_chunk_cp in main")
 
     # Get the cp in a second pass to avoid RAM issues
     ave_pair_cp = pair_cp_sum / n_frames
     cp_values = np.zeros(n_pairs)
-    for frame in prange(n_frames):
+    for frame in range(n_frames):
         k = 0
         triangle = np.zeros(n_pairs, dtype=float)
         frame_coords = traj_coords[frame]
@@ -195,8 +203,6 @@ def get_chunk_cp(traj_coords, resids_to_atoms, pair_cp_sum, calphas):
         cp_values += (triangle - ave_pair_cp) ** 2
     return cp_values
 
-
-@njit(parallel=False)
 def get_frame_info(frame_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut, da_cut, ha_cut, dha_cut, calphas, oxy, nitro, donors, hydros, acceptors):
     """
     Args:
@@ -237,12 +243,10 @@ def get_frame_info(frame_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut,
 
     # Get min dist for all residues in frame
     index = 0
-    for i in prange(n_resids):
-        # coords_i = frame_coords[resids_to_atoms[i]]
+    for i in range(n_resids):
         coords_i = frame_coords[resids_to_noh[i]]
         calpha_i = frame_coords[calphas[i]]
         for j in range(i + 1, n_resids):
-            # coords_j = frame_coords[resids_to_atoms[j]]
             coords_j = frame_coords[resids_to_noh[j]]
             calpha_j = frame_coords[calphas[j]]
 
@@ -261,16 +265,15 @@ def get_frame_info(frame_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut,
             # SALTBRIDGES: Get one salt bridge between residues i and j
             sb = 0
             if (min_dist < sb_cut) and (i + 1 != j):
-
                 # Direct case
-                oxy_i = tt.dict_get(oxy, i)
-                nitro_j = tt.dict_get(nitro, j)
+                oxy_i = oxy[i]
+                nitro_j = nitro[j]
                 if (oxy_i is not None) and (nitro_j is not None):
                     sb += geom.find_sb(frame_coords, oxy_i, nitro_j, sb_cut)
 
                 # Inverse case
-                oxy_j = tt.dict_get(oxy, j)
-                nitro_i = tt.dict_get(nitro, i)
+                oxy_j = oxy[j]
+                nitro_i = nitro[i]
                 if (oxy_j is not None) and (nitro_i is not None):
                     sb += geom.find_sb(frame_coords, oxy_j, nitro_i, sb_cut)
             if sb:
@@ -279,22 +282,19 @@ def get_frame_info(frame_coords, resids_to_atoms, resids_to_noh, nb_cut, sb_cut,
             # HBONDS: Get one hydrogen bond between residues i and j
             hb = 0
             if min_dist <= da_cut:
-
                 # Direct case
-                donors_i = tt.dict_get(donors, i)
-                hydros_i = tt.dict_get(hydros, i)
-                acceptors_j = tt.dict_get(acceptors, j)
+                donors_i = donors[i]
+                hydros_i = hydros[i]
+                acceptors_j = acceptors[j]
                 if (donors_i is not None) and (acceptors_j is not None):
-                    hb += geom.find_hb(frame_coords, donors_i, hydros_i,
-                                       acceptors_j, da_cut, ha_cut, dha_cut)
+                    hb += geom.find_hb(frame_coords, donors_i, hydros_i, acceptors_j, da_cut, ha_cut, dha_cut)
 
                 # Inverse case
-                donors_j = tt.dict_get(donors, j)
-                hydros_j = tt.dict_get(hydros, j)
-                acceptors_i = tt.dict_get(acceptors, i)
+                donors_j = donors[j]
+                hydros_j = hydros[j]
+                acceptors_i = acceptors[i]
                 if (donors_j is not None) and (acceptors_i is not None):
-                    hb += geom.find_hb(frame_coords, donors_j, hydros_j,
-                                       acceptors_i, da_cut, ha_cut, dha_cut)
+                    hb += geom.find_hb(frame_coords, donors_j, hydros_j, acceptors_i, da_cut, ha_cut, dha_cut)
             if hb:
                 pair_hb[index] = 1
 
