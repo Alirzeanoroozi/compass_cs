@@ -4,24 +4,8 @@ import igraph as ig
 import leidenalg as la
 import networkx as nx
 
-
 class CommunityDetector:
-    """
-    A class for detecting communities in a graph using various algorithms.
-
-    Attributes:
-        G (nx.Graph): The input graph for community detection.
-    """
-
     def __init__(self, G, atom_mapping=None):
-        """
-        Initialize the NetworkParameters class.
-
-        Args:
-            G (nx.Graph): Network graph with weighted edges.
-            atom_mapping (dict, optional): Dictionary mapping node indices to atom information.
-                Expected format: {node_id: (chain, residue_name, residue_number, atom_name)}
-        """
         self.G = G
         self.atom_mapping = atom_mapping if atom_mapping else {}
 
@@ -113,22 +97,7 @@ class CommunityDetector:
 
 
 class CliqueDetector:
-    """
-    A class for detecting cliques in a graph and saving them to files.
-
-    Attributes:
-        G (nx.Graph): The input graph for clique detection.
-    """
-
     def __init__(self, G, atom_mapping=None):
-        """
-        Initialize the NetworkParameters class.
-
-        Args:
-            G (nx.Graph): Network graph with weighted edges.
-            atom_mapping (dict, optional): Dictionary mapping node indices to atom information.
-                Expected format: {node_id: (chain, residue_name, residue_number, atom_name)}
-        """
         self.G = G
         self.atom_mapping = atom_mapping if atom_mapping else {}
 

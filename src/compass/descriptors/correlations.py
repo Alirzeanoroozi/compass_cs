@@ -1,79 +1,41 @@
 # Created by gonzalezroy at 6/24/24
 import numpy as np
 
-def calculate_mi_and_gc(cov_mat, num_atoms_per_residue):
+
+def compute_gc_matrix(corr_coords):
     """
-    Calculate Mutual Information (MI) scores and Generalized Correlation (GC) matrix.
+    Compute Mutual Information (MI) and Generalized Correlation (GC) matrices
+    from per-residue backbone (CA) coordinates.
 
     Args:
-        cov_mat: covariance matrix
-        num_atoms_per_residue: number of atoms per residue
+        corr_coords: (n_frames, n_residues, 3) array of CA xyz per frame
 
     Returns:
-        MI_scores: Mutual Information scores
-        GC_matrix: Generalized Correlation matrix
+        MI_scores: (n_residues, n_residues) mutual information matrix
+        GC_matrix: (n_residues, n_residues) generalized correlation matrix
     """
-    num_residues = cov_mat.shape[0] // 3
-    MI_scores = np.zeros((num_residues, num_residues), dtype=np.float32)
-    GC_matrix = np.zeros((num_residues, num_residues), dtype=np.float32)
+    n_frames, n_res, _ = corr_coords.shape
 
-    for i in range(num_residues):
-        for j in range(i, num_residues):
-            cov_ij = np.float32(0)
-            var_i = np.float32(0)
-            var_j = np.float32(0)
+    # Covariance over the 3*n_res flattened coordinate vector
+    flat = corr_coords.reshape(n_frames, -1)  # (F, 3R)
+    cov = np.cov(flat, rowvar=False)           # (3R, 3R)
 
-            for k in range(num_atoms_per_residue):
-                for l in range(num_atoms_per_residue):
-                    idx_i = i * num_atoms_per_residue + k
-                    idx_j = j * num_atoms_per_residue + l
-                    cov_ij += cov_mat[idx_i, idx_j]
-                    if k == l:
-                        var_i += cov_mat[idx_i, idx_i]
-                        var_j += cov_mat[idx_j, idx_j]
-            cov_ij /= num_atoms_per_residue ** 2
-            var_i /= num_atoms_per_residue
-            var_j /= num_atoms_per_residue
-            div_term = (cov_ij ** 2) / (var_i * var_j)
-            MI_score = np.float32(0.5 * np.log(1 + div_term))
-            MI_scores[i, j] = MI_scores[j, i] = MI_score
-            exp_term = np.exp(-2 * MI_score)
-            GC_matrix[i, j] = GC_matrix[j, i] = np.sqrt(1 - exp_term)
+    # Reshape into residue-pair 3x3 blocks: cov_blocks[i,j] is the 3x3
+    # cross-covariance between residue i and residue j
+    cov_blocks = cov.reshape(n_res, 3, n_res, 3)
+
+    # var_i = mean of the 3 diagonal xyz variances for residue i
+    var = np.einsum('ikik->i', cov_blocks) / 3.0   # (n_res,)
+
+    # cov_ij = mean of the 3x3 cross-covariance block
+    cov_ij = np.einsum('ikjl->ij', cov_blocks) / 9.0  # (n_res, n_res)
+
+    # MI = 0.5 * ln(1 + cov_ij^2 / (var_i * var_j))
+    var_product = np.outer(var, var)
+    div_term = (cov_ij ** 2) / var_product
+    MI_scores = (0.5 * np.log(1.0 + div_term)).astype(np.float32)
+
+    # GC = sqrt(1 - exp(-2 * MI))
+    GC_matrix = np.sqrt(1.0 - np.exp(-2.0 * MI_scores)).astype(np.float32)
 
     return MI_scores, GC_matrix
-
-def compute_gc_matrix(corr_coords, num_atoms_per_residue=1):
-    """
-    Compute the Generalized Correlation (GC) matrix.
-
-    Args:
-        corr_coords: Coordinates for computing correlations
-        num_atoms_per_residue: Number of atoms per residue
-
-    Returns:
-        MI_scores: Mutual Information scores
-        GC_matrix: Generalized Correlation matrix
-    """
-    # Compute covariance matrix from trajectory coordinates
-    cov_matrix = compute_cov_matrix_trajectory(corr_coords)
-    # Calculate Mutual Information (MI) scores and Generalized Correlation (GC) matrix
-    test_matrix = cov_matrix[:2, :2]
-    _, _ = calculate_mi_and_gc(test_matrix, num_atoms_per_residue)
-    MI_scores, GC_matrix = calculate_mi_and_gc(cov_matrix,
-                                               num_atoms_per_residue)
-    # print("calculating generalised correlations here")
-    return MI_scores, GC_matrix
-
-def compute_cov_matrix_trajectory(coords):
-    """
-    Compute covariance matrix from trajectory coordinates.
-
-    Args:
-        coords: trajectory coordinates
-
-    Returns:
-        cov_matrix: covariance matrix
-    """
-    flat_coords = coords.reshape(coords.shape[0], -1)
-    cov_matrix = np.cov(flat_coords.T)
-    return cov_matrix

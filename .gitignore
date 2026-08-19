@@ -59,3 +59,5 @@ example/Spain_Task/*
 example/SirahRun/*
 __pycache__/*
 *.nbc
+*.nbi
+example/*

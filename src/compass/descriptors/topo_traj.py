@@ -54,7 +54,7 @@ def prepare_datastructures(trajectories, topo, out_dir, heavies, first_timer):
                 f"name {row['name']}, "
                 f"element {row['element']}, "
                 f"resSeq {row['resSeq']}, "
-                f"resName {row['resName']}\n "
+                f"resName {row['resName']}\n"
             )
                   
     map_file = join(out_dir, 'mapping_file.txt')
@@ -134,6 +134,7 @@ def get_sb_indices(topo_df, atoms_to_resids):
 
 def get_dha_indices(topo_df, bonds, heavies_elements, atoms_to_resids):
     # Get heavies and hydrogen indices
+    
     all_hydrogens = set(topo_df[topo_df.element == "H"].index)
     a_indices = set(np.where(topo_df.element.isin(heavies_elements))[0])
 

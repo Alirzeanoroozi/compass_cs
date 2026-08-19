@@ -1,8 +1,6 @@
 import os
 import time
 from os.path import join
-from resource import getrusage as resource_usage, RUSAGE_SELF
-from time import time as timestamp
 import sys
 import mdtraj as md
 
@@ -14,7 +12,6 @@ import compass.descriptors.topo_traj as tt
 import compass.network.generals as gn
 
 def runner():
-    start_time, start_resources = timestamp(), resource_usage(RUSAGE_SELF)
     first_timer = time.time()
 
     # Parse configuration file
@@ -46,7 +43,7 @@ def runner():
     # Create a PDB for the network visualization under the network output folder
     filename = os.path.basename(arg.topo)
     pdb_name = join(arg.network_dir, f'{os.path.splitext(filename)[0]}_internal.pdb')
-    parsed = next(md.iterload(arg.traj, top=arg.topo, chunk=1))
+    parsed = next(md.iterload(arg.traj.split()[0], top=arg.topo, chunk=1))
     parsed.save_pdb(pdb_name)
     arg.pdb_file_path = pdb_name
 
@@ -76,11 +73,5 @@ def runner():
     #         for target_residue in target_residues:
     #             gn.find_paths(arg.pdb_file_path, arg.network_dir, dist_cutoffs[0], source_residue.strip(), target_residue.strip())
 
-    end_resources, end_time = resource_usage(RUSAGE_SELF), timestamp()
-    real_time = end_time - start_time
-    user_time = end_resources.ru_utime - start_resources.ru_utime
-    system_time = end_resources.ru_stime - start_resources.ru_stime
-    print(f" ⏳  User Time: {user_time:.2f} seconds")
-    print(f" ⏳  System Time: {system_time:.2f} seconds")
-    print(f" ⏳  Wall Clock Time: {real_time:.2f} seconds")
+    print(f" ⏳  Wall Clock Time: {time.time() - first_timer:.2f} seconds")
     print(f"**** -------Normal Termination -------****")

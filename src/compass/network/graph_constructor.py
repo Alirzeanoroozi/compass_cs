@@ -2,18 +2,17 @@ import json
 import matplotlib.pyplot as plt
 import networkx as nx
 
-from compass.network import read_files as rf
+from compass.network.read_files import read_matrix
 
 class GraphConstructor:
     def __init__(self, distance_file, adjacency_file, distance_cutoffs):
         self.distance_file = distance_file
         self.adjacency_file = adjacency_file
         self.distance_cutoffs = distance_cutoffs
-        self.reader = rf.ReadFiles()  # Create an instance of ReadFiles
 
     def build_graph_from_matrices(self, distance_cutoff):
-        min_dist_matrix = self.reader.read_matrix(self.distance_file)
-        adjacency_matrix = self.reader.read_matrix(self.adjacency_file)
+        min_dist_matrix = read_matrix(self.distance_file)
+        adjacency_matrix = read_matrix(self.adjacency_file)
 
         G = nx.Graph()
         num_nodes = len(min_dist_matrix)
@@ -23,7 +22,7 @@ class GraphConstructor:
 
         for i in range(num_nodes):
             for j in range(i + 1, num_nodes):
-                if min_dist_matrix[i, j] < int(distance_cutoff) and adjacency_matrix[i, j] > 0:
+                if min_dist_matrix[i, j] < float(distance_cutoff) and adjacency_matrix[i, j] > 0:
                     G.add_edge(i, j, weight=adjacency_matrix[i, j])
         return G
 

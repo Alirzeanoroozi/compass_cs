@@ -1,7 +1,7 @@
 import random
 import json
 
-from compass.network.read_files import ReadFiles
+from compass.network.read_files import read_centrality_from_file, read_edge_betweenness_from_file
 
 class PyMOLVisualizer:
     def __init__(self, pdb_file, atom_mapping, graph):
@@ -10,15 +10,6 @@ class PyMOLVisualizer:
         self.graph = graph
 
     def parse_communities_file(self, communities_file):
-        """
-        Parses the communities JSON file and returns a dictionary of communities.
-
-        Args:
-            communities_file (str): Path to the file containing communities.
-
-        Returns:
-            dict: A dictionary where keys are community indices and values are lists of labels.
-        """
         with open(communities_file, 'r') as f:
             payload = json.load(f)
 
@@ -37,13 +28,6 @@ class PyMOLVisualizer:
         return communities
 
     def communities_pml(self, communities_file, output_pml_file):
-        """
-        Generates a PyMOL script to visualize communities.
-
-        Args:
-            communities_file (str): Path to the file containing communities.
-            output_pml_file (str): Path to the output PyMOL script file.
-        """
         communities = self.parse_communities_file(communities_file)
 
         standard_colors = [
@@ -95,15 +79,6 @@ class PyMOLVisualizer:
         print(f" 🧊  PyMOL script for communities saved to {output_pml_file}")
 
     def parse_cliques_file(self, cliques_file):
-        """
-        Parses the cliques JSON file and returns a dictionary of cliques.
-
-        Args:
-            cliques_file (str): Path to the file containing cliques.
-
-        Returns:
-            dict: A dictionary where keys are clique indices and values are lists of labels.
-        """
         with open(cliques_file, 'r') as f:
             payload = json.load(f)
 
@@ -122,13 +97,6 @@ class PyMOLVisualizer:
         return cliques
 
     def cliques_pml(self, cliques_file, output_pml):
-        """
-        Generates a PyMOL script to visualize cliques.
-
-        Args:
-            cliques_file (str): A file mapping nodes to their clique index.
-            output_pml (str): Path to the output PyMOL script file.
-        """
         cliques = self.parse_cliques_file(cliques_file)
 
         with open(output_pml, 'w') as f:
@@ -162,17 +130,8 @@ class PyMOLVisualizer:
         print(f" 🧊  PyMOL script for cliques saved to {output_pml}")
 
     def graph_pml(self, centrality_file, edge_betweenness_file, output_pml):
-        """
-        Generates PyMOL scripts to visualize the graph with centrality and edge betweenness.
-
-        Args:
-            centrality_file (str): Path to the file containing centrality values.
-            edge_betweenness_file (str): Path to the file containing edge betweenness values.
-            output_pml (str): Prefix for the output PyMOL script files.
-        """
-        centrality_df = ReadFiles.read_centrality_from_file(centrality_file)
-        betweenness_df = ReadFiles.read_edge_betweenness_from_file(
-            edge_betweenness_file)
+        centrality_df = read_centrality_from_file(centrality_file)
+        betweenness_df = read_edge_betweenness_from_file(edge_betweenness_file)
         output_files = {
             "all": open(f"{output_pml}_all.pml", 'w'),
         }
@@ -269,14 +228,10 @@ class PyMOLVisualizer:
         except Exception as e:
             print(f"An error occurred: {e}")
 
-    def write_pml_script_for_residue_paths(self, residue_list, output_pml_file):
-        """
-        Generates a PyMOL script to draw lines connecting consecutive residues.
+    def write_pml_script_for_residue_paths(self, paths_file, output_pml_file):
+        with open(paths_file, 'r') as f:
+            paths_list = json.load(f)['paths']
 
-        Args:
-            residue_list (list): List of residue pairs or identifiers.
-            output_pml_file (str): Path to the output PyMOL script file.
-        """
         backbone = "(name CA or name C5' or name GC or name C5X)"
         with open(output_pml_file, 'w') as f:
             f.write(f"load {self.pdb_file}\n")
@@ -284,127 +239,92 @@ class PyMOLVisualizer:
             f.write("set_color black, [0.0, 0.0, 0.0]\n")
             f.write("bg_color white\n")
 
-            for item in residue_list:
-                if isinstance(item, (list, tuple)) and len(item) >= 2:
-                    res1, res2 = item[0], item[1]
-                else:
-                    continue
-                f.write(f"select resi {res1}, resi {res2}\n")
-                f.write(
-                    f"distance path_{res1}_{res2}, resi {res1} and {backbone}, resi {res2} and {backbone}\n")
-                f.write(f"set gap_width, 0, path_{res1}_{res2}\n")
-                f.write(f"color black, path_{res1}_{res2}\n")
-                f.write(f"hide labels, path_{res1}_{res2}\n")
+            for path in paths_list:
+                source_residue, target_residue = int(path['source']) + 1, int(path['target']) + 1
+                f.write(f"select resi {source_residue}, resi {target_residue}\n")
+                f.write(f"distance path_{source_residue}_{target_residue}, resi {source_residue} and {backbone}, resi {target_residue} and {backbone}\n")
+                f.write(f"set gap_width, 0, path_{source_residue}_{target_residue}\n")
+                f.write(f"color black, path_{source_residue}_{target_residue}\n")
+                f.write(f"hide labels, path_{source_residue}_{target_residue}\n")
 
         print(f" 🧊  PyMOL script for residue paths saved to {output_pml_file}")
 
-    def write_pml_script_for_top_shortest_paths(self, top_50_file,
-                                                edge_betweenness_file,
-                                                output_pml_file):
-        """
-        Generates a PyMOL script to draw lines connecting consecutive residues in the top shortest paths.
-        Edge thickness is based on edge betweenness values.
+    def write_pml_script_for_top_shortest_paths(self, top_file, edge_betweenness_file, output_pml_file):
+        betweenness_df = read_edge_betweenness_from_file(edge_betweenness_file)
+        max_betweenness = betweenness_df['Betweenness'].max()
 
-        Args:
-            top_50_file (str): Path to the file containing top shortest paths and mapped residues.
-            edge_betweenness_file (str): Path to the file containing edge betweenness values.
-            output_pml_file (str): Path to the output PyMOL script file.
-        """
-        try:
-            betweenness_df = ReadFiles.read_edge_betweenness_from_file(
-                edge_betweenness_file)
-            max_betweenness = betweenness_df['Betweenness'].max()
-        except Exception as e:
-            print(f"Error reading edge betweenness file: {e}")
-            return
+        with open(top_file, 'r') as f:
+            payload = json.load(f)
+        paths = [entry["path"] for entry in payload.get("paths", []) if "path" in entry]
 
-        try:
-            with open(top_50_file, 'r') as f:
-                payload = json.load(f)
-            paths = [entry["path"] for entry in payload.get("paths", []) if "path" in entry]
-        except Exception as e:
-            print(f"Error reading top shortest paths file: {e}")
-            return
+        with open(output_pml_file, 'w') as f:
+            written_selections = set()
+            written_distances = set()
+            written_spheres = set()
+            f.write(f"load {self.pdb_file}\n")
+            for path in paths:
+                for i in range(len(path) - 1):
+                    node1 = path[i]
+                    node2 = path[i + 1]
+                    try:
+                        res_name1, atom_name1, res_num1, chain_id1 = self.atom_mapping[str(node1)]
+                        res_name2, atom_name2, res_num2, chain_id2 = self.atom_mapping[str(node2)]
+                    except KeyError as e:
+                        print(f"Warning: Node {e} not found in atom mappings.")
+                        continue
 
-        try:
-            with open(output_pml_file, 'w') as f:
-                written_selections = set()
-                written_distances = set()
-                written_spheres = set()
-                f.write(f"load {self.pdb_file}\n")
-                for path in paths:
-                    for i in range(len(path) - 1):
-                        node1 = path[i]
-                        node2 = path[i + 1]
-                        try:
-                            res_name1, atom_name1, res_num1, chain_id1 = \
-                                self.atom_mapping[str(node1)]
-                            res_name2, atom_name2, res_num2, chain_id2 = \
-                                self.atom_mapping[str(node2)]
-                        except KeyError as e:
-                            print(
-                                f"Warning: Node {e} not found in atom mappings.")
-                            continue
+                    edge_betweenness_row = betweenness_df[((betweenness_df['Res1'] == res_num1) & (betweenness_df['Res2'] == res_num2)) | ((betweenness_df['Res1'] == res_num2) & (betweenness_df['Res2'] == res_num1))]
+                    if edge_betweenness_row.empty:
+                        print(f"Warning: No betweenness data for edge ({node1}, {node2}).")
+                        continue
 
-                        edge_betweenness_row = betweenness_df[
-                            ((betweenness_df['Res1'] == res_num1) & (
-                                        betweenness_df['Res2'] == res_num2)) |
-                            ((betweenness_df['Res1'] == res_num2) & (
-                                        betweenness_df['Res2'] == res_num1))
-                        ]
-                        if edge_betweenness_row.empty:
-                            print(
-                                f"Warning: No betweenness data for edge ({node1}, {node2}).")
-                            continue
+                    betweenness_value = edge_betweenness_row.iloc[0]['Betweenness']
+                    norm_betweenness = betweenness_value / max_betweenness if max_betweenness else 0
+                    thickness = 1 + 10 * norm_betweenness
 
-                        betweenness_value = edge_betweenness_row.iloc[0]['Betweenness']
-                        norm_betweenness = betweenness_value / max_betweenness if max_betweenness else 0
-                        thickness = 1 + 10 * norm_betweenness
+                    selection1 = f"select resi_{res_num1}, chain {chain_id1} and resi {res_num1} and name {atom_name1}"
+                    selection2 = f"select resi_{res_num2}, chain {chain_id2} and resi {res_num2} and name {atom_name2}"
+                    if selection1 not in written_selections:
+                        f.write(f"{selection1}\n")
+                        written_selections.add(selection1)
+                    if selection2 not in written_selections:
+                        f.write(f"{selection2}\n")
+                        written_selections.add(selection2)
 
-                        selection1 = f"select resi_{res_num1}, chain {chain_id1} and resi {res_num1} and name {atom_name1}"
-                        selection2 = f"select resi_{res_num2}, chain {chain_id2} and resi {res_num2} and name {atom_name2}"
-                        if selection1 not in written_selections:
-                            f.write(f"{selection1}\n")
-                            written_selections.add(selection1)
-                        if selection2 not in written_selections:
-                            f.write(f"{selection2}\n")
-                            written_selections.add(selection2)
+                    sphere_cmd1 = f"show spheres, resi {res_num1} and chain {chain_id1} and name {atom_name1}"
+                    sphere_cmd2 = f"show spheres, resi {res_num2} and chain {chain_id2} and name {atom_name2}"
+                    if sphere_cmd1 not in written_spheres:
+                        f.write(f"{sphere_cmd1}\n")
+                        written_spheres.add(sphere_cmd1)
+                    if sphere_cmd2 not in written_spheres:
+                        f.write(f"{sphere_cmd2}\n")
+                        written_spheres.add(sphere_cmd2)
 
-                        sphere_cmd1 = f"show spheres, resi {res_num1} and chain {chain_id1} and name {atom_name1}"
-                        sphere_cmd2 = f"show spheres, resi {res_num2} and chain {chain_id2} and name {atom_name2}"
-                        if sphere_cmd1 not in written_spheres:
-                            f.write(f"{sphere_cmd1}\n")
-                            written_spheres.add(sphere_cmd1)
-                        if sphere_cmd2 not in written_spheres:
-                            f.write(f"{sphere_cmd2}\n")
-                            written_spheres.add(sphere_cmd2)
-
-                        sorted_res = sorted([
-                            (res_num1, chain_id1, atom_name1),
-                            (res_num2, chain_id2, atom_name2),
-                        ])
-                        distance_key = f"edge_{sorted_res[0][0]}_{sorted_res[1][0]}"
-                        distance_cmd = (
-                            f"distance {distance_key}, "
-                            f"chain {sorted_res[0][1]} and resi {sorted_res[0][0]} and name {sorted_res[0][2]}, "
-                            f"chain {sorted_res[1][1]} and resi {sorted_res[1][0]} and name {sorted_res[1][2]}"
-                        )
-                        if distance_cmd not in written_distances:
-                            f.write(f"{distance_cmd}\n")
-                            f.write(
-                                f"set dash_width, {thickness:.2f}, {distance_key}\n")
-                            written_distances.add(distance_cmd)
-
-                f.write("hide labels\n")
-                f.write("set dash_gap, 0\n")
-                f.write("set dash_color, grey10\n")
-                f.write("bg_color white\n")
-                f.write("set sphere_transparency, 0.3\n")
-                f.write("set sphere_scale, 0.5\n")
+                    sorted_res = sorted([
+                        (res_num1, chain_id1, atom_name1),
+                        (res_num2, chain_id2, atom_name2),
+                    ])
+                    distance_key = f"edge_{sorted_res[0][0]}_{sorted_res[1][0]}"
+                    distance_cmd = (
+                        f"distance {distance_key}, "
+                        f"chain {sorted_res[0][1]} and resi {sorted_res[0][0]} and name {sorted_res[0][2]}, "
+                        f"chain {sorted_res[1][1]} and resi {sorted_res[1][0]} and name {sorted_res[1][2]}"
+                    )
+                    if distance_cmd not in written_distances:
+                        f.write(f"{distance_cmd}\n")
+                        f.write(
+                            f"set dash_width, {thickness:.2f}, {distance_key}\n")
+                        written_distances.add(distance_cmd)
+                break
+            f.write("hide labels\n")
+            f.write("set dash_gap, 0\n")
+            f.write("set dash_color, grey10\n")
+            f.write("bg_color white\n")
+            f.write("set sphere_transparency, 0.3\n")
+            f.write("set sphere_scale, 0.5\n")
 
             print(f"🧊 PyMOL script for top shortest paths saved to {output_pml_file}")
-        except Exception as e:
-            print(f"Error writing PyMOL script to file: {e}")
+
 
     def write_pml_script_for_alternative_paths(self, alternative_paths_file,
                                                output_pml_file):

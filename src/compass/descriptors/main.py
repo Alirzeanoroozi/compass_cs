@@ -38,15 +38,21 @@ def _calpha_index_array(calphas, n_resids):
     return ca_idx
 
 def compute_descriptors(arg, resids_to_atoms, resids_to_noh, atoms_to_resids, calphas, oxy, nitro, donors, hydros, acceptors, first_timer):
-    # Initialize containers
     n_resids = len(resids_to_atoms)
     n_pairs = int(n_resids * (n_resids - 1) / 2)
-    pair_min_dist_sum = np.zeros(n_pairs) # minimum distance between every pair of residues
-    pair_cp_sum = np.zeros(n_pairs) # distance between calpha atoms of every pair of residues
-    pair_nb_sum = np.zeros(n_pairs) # non-bonded contacts between every pair of residues
-    pair_sb_sum = np.zeros(n_pairs) # salt bridges between every pair of residues
-    pair_hb_sum = np.zeros(n_pairs) # hydrogen bonds between every pair of residues
-    pair_int_sum = np.zeros(n_pairs) # interactions between every pair of residues
+
+    pair_min_dist_sum = np.zeros(n_pairs)
+    pair_nb_sum = np.zeros(n_pairs)
+    pair_sb_sum = np.zeros(n_pairs)
+    pair_hb_sum = np.zeros(n_pairs)
+    pair_int_sum = np.zeros(n_pairs)
+
+    # Welford online variance accumulators for CP
+    pair_cp_mean = np.zeros(n_pairs)
+    pair_cp_m2 = np.zeros(n_pairs)
+
+    # Backbone coords collected per frame for MI/GC
+    corr_list = []
 
     ca_idx = _calpha_index_array(calphas, n_resids)
     noh_idx, noh_n = _pad_index_map(resids_to_noh, n_resids)
@@ -58,47 +64,44 @@ def compute_descriptors(arg, resids_to_atoms, resids_to_noh, atoms_to_resids, ca
 
     n_frames = 0
     for chunk in get_xyz_chunks(arg.traj.split(), arg.topo, chunk_size=1):
-        n_frames += 1
         frame = np.ascontiguousarray(chunk[0])
         pair_min_dist, pair_cp, pair_nb, pair_sb, pair_hb, pair_int = get_frame_info(
             frame, noh_idx, noh_n, ca_idx, arg.nb_cut, arg.sb_cut, arg.da_cut,
             arg.ha_cut, arg.dha_cut, oxy_idx, oxy_n, nitro_idx, nitro_n,
             donors_idx, donors_n, hydros_idx, hydros_n, acceptors_idx, acceptors_n)
+
         pair_min_dist_sum += pair_min_dist
-        pair_cp_sum += pair_cp
         pair_nb_sum += pair_nb
         pair_sb_sum += pair_sb
         pair_hb_sum += pair_hb
         pair_int_sum += pair_int
 
+        # Welford online update for CP variance
+        delta = pair_cp - pair_cp_mean
+        pair_cp_mean += delta / (n_frames + 1)
+        delta2 = pair_cp - pair_cp_mean
+        pair_cp_m2 += delta * delta2
+
+        # Collect backbone coordinates for correlation
+        corr_list.append(frame[ca_idx].copy())
+
+        n_frames += 1
+
     # Compute average values
-    ave_min_dist = (pair_min_dist_sum / n_frames) * 10 # convert to nanometers
-    ave_pair_cp = pair_cp_sum / n_frames
+    ave_min_dist = (pair_min_dist_sum / n_frames) * 10
     occ_nb = pair_nb_sum / n_frames
     occ_sb = pair_sb_sum / n_frames
     occ_hb = pair_hb_sum / n_frames
     occ_int = pair_int_sum / n_frames
 
-    # Do a 2nd pass to compute cp & extract coords for correlation matrices
-    pair_cp_sum2 = np.zeros(n_pairs)
-    corr_coords = np.zeros((n_frames, n_resids, 3))
+    # Communication Propensity = variance * 100, then invert
+    cp = (pair_cp_m2 / n_frames) * 100
+    cp = abs(cp - max(cp))
 
-    n_frames = 0
-    for chunk in get_xyz_chunks(arg.traj.split(), arg.topo, chunk_size=1):
-        n_frames += 1
-        frame = np.ascontiguousarray(chunk[0])
-        pair_cp2 = get_chunk_cp(frame, ca_idx, ave_pair_cp)
-        pair_cp_sum2 += pair_cp2
-
-        # Get correlation coordinates
-        corr_coords[n_frames - 1, :] = frame[ca_idx]
-    
-    # Compute Communication Propensity
-    cp = (pair_cp_sum2 / n_frames) * 100
-    cp = abs(cp - max(cp))  # Invert CP matrix
-    
-    # Compute MI & GC
-    mi, gc = corr.compute_gc_matrix(corr_coords, num_atoms_per_residue=3)
+    # MI & GC from backbone coordinates
+    corr_coords = np.stack(corr_list)
+    del corr_list
+    mi, gc = corr.compute_gc_matrix(corr_coords)
 
     running_time = round(time.time() - first_timer, 2)
     print(f" 📋 System details: number of frames are {n_frames}")
@@ -106,19 +109,6 @@ def compute_descriptors(arg, resids_to_atoms, resids_to_noh, atoms_to_resids, ca
 
     return ave_min_dist, occ_nb, cp, occ_sb, occ_hb, occ_int, mi, gc
 
-@njit(parallel=True, fastmath=True, cache=True)
-def get_chunk_cp(traj_coords, ca_idx, ave_pair_cp):
-    n_resids = ca_idx.shape[0]
-    n_pairs = n_resids * (n_resids - 1) // 2
-    triangle = np.zeros(n_pairs)
-
-    for i in prange(n_resids):
-        calpha_i = traj_coords[ca_idx[i]]
-        base = i * n_resids - i * (i + 1) // 2
-        for j in range(i + 1, n_resids):
-            index = base + (j - i - 1)
-            triangle[index] = calc_dist(calpha_i, traj_coords[ca_idx[j]])
-    return (triangle - ave_pair_cp) ** 2
 
 @njit(parallel=True, fastmath=True, cache=True)
 def get_frame_info(frame_coords, noh_idx, noh_n, ca_idx, nb_cut, sb_cut, da_cut,
