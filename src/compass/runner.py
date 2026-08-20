@@ -21,10 +21,10 @@ def runner():
     arg = cfg.parse_params(config_path)
 
     # Prepare data structures
-    resids_to_atoms, resids_to_noh, atoms_to_resids, calphas, oxy, nitro, donors, hydros, acceptors = tt.prepare_datastructures(arg.traj, arg.topo, arg.out_dir, arg.heavies, first_timer)
+    resids_to_atoms, resids_to_noh, calphas, oxy, nitro, donors, hydros, acceptors = tt.prepare_datastructures(arg.traj, arg.topo, arg.out_dir, arg.heavies, first_timer)
 
     # Compute descriptors
-    ave_min_dist, occ_nb, cp, occ_sb, occ_hb, occ_int, mi, gc = mm.compute_descriptors(arg, resids_to_atoms, resids_to_noh, atoms_to_resids, calphas, oxy, nitro, donors, hydros, acceptors, first_timer)
+    ave_min_dist, occ_nb, cp, occ_sb, occ_hb, occ_int, mi, gc = mm.compute_descriptors(arg, resids_to_atoms, resids_to_noh, calphas, oxy, nitro, donors, hydros, acceptors, first_timer)
 
     # Save matrices
     n = len(resids_to_atoms)

@@ -1,7 +1,6 @@
 # Created by gonzalezroy at 6/24/24
 import numpy as np
 
-
 def compute_gc_matrix(corr_coords):
     """
     Compute Mutual Information (MI) and Generalized Correlation (GC) matrices

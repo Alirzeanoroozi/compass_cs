@@ -3,10 +3,10 @@ import time
 import numpy as np
 import mdtraj as md
 from numba import njit, prange
+from tqdm import tqdm
 
 import compass.descriptors.correlations as corr
 from compass.descriptors.geometry import calc_dist, calc_min_dist, find_hb, find_sb
-
 
 def get_xyz_chunks(trajs, topo, chunk_size=500):
     for traj in trajs:
@@ -37,19 +37,18 @@ def _calpha_index_array(calphas, n_resids):
         ca_idx[i] = calphas[i]
     return ca_idx
 
-def compute_descriptors(arg, resids_to_atoms, resids_to_noh, atoms_to_resids, calphas, oxy, nitro, donors, hydros, acceptors, first_timer):
+def compute_descriptors(arg, resids_to_atoms, resids_to_noh, calphas, oxy, nitro, donors, hydros, acceptors, first_timer):
     n_resids = len(resids_to_atoms)
-    n_pairs = int(n_resids * (n_resids - 1) / 2)
 
-    pair_min_dist_sum = np.zeros(n_pairs)
-    pair_nb_sum = np.zeros(n_pairs)
-    pair_sb_sum = np.zeros(n_pairs)
-    pair_hb_sum = np.zeros(n_pairs)
-    pair_int_sum = np.zeros(n_pairs)
+    min_dist_sum = np.zeros((n_resids, n_resids))
+    nb_sum = np.zeros((n_resids, n_resids))
+    sb_sum = np.zeros((n_resids, n_resids))
+    hb_sum = np.zeros((n_resids, n_resids))
+    int_sum = np.zeros((n_resids, n_resids))
 
     # Welford online variance accumulators for CP
-    pair_cp_mean = np.zeros(n_pairs)
-    pair_cp_m2 = np.zeros(n_pairs)
+    cp_mean = np.zeros((n_resids, n_resids))
+    cp_m2 = np.zeros((n_resids, n_resids))
 
     # Backbone coords collected per frame for MI/GC
     corr_list = []
@@ -62,41 +61,44 @@ def compute_descriptors(arg, resids_to_atoms, resids_to_noh, atoms_to_resids, ca
     hydros_idx, hydros_n = _pad_index_map(hydros, n_resids)
     acceptors_idx, acceptors_n = _pad_index_map(acceptors, n_resids)
 
+    chunk_size = 50
     n_frames = 0
-    for chunk in get_xyz_chunks(arg.traj.split(), arg.topo, chunk_size=1):
-        frame = np.ascontiguousarray(chunk[0])
-        pair_min_dist, pair_cp, pair_nb, pair_sb, pair_hb, pair_int = get_frame_info(
-            frame, noh_idx, noh_n, ca_idx, arg.nb_cut, arg.sb_cut, arg.da_cut,
-            arg.ha_cut, arg.dha_cut, oxy_idx, oxy_n, nitro_idx, nitro_n,
-            donors_idx, donors_n, hydros_idx, hydros_n, acceptors_idx, acceptors_n)
+    for chunk_xyz in tqdm(get_xyz_chunks(arg.traj.split(), arg.topo, chunk_size=chunk_size)):
+        n_chunk_frames = chunk_xyz.shape[0]
+        for f in range(n_chunk_frames):
+            frame = np.ascontiguousarray(chunk_xyz[f])
+            f_mindist, f_cp, f_nb, f_sb, f_hb, f_int = get_frame_info(
+                frame, noh_idx, noh_n, ca_idx, arg.nb_cut, arg.sb_cut, arg.da_cut,
+                arg.ha_cut, arg.dha_cut, oxy_idx, oxy_n, nitro_idx, nitro_n,
+                donors_idx, donors_n, hydros_idx, hydros_n, acceptors_idx, acceptors_n)
 
-        pair_min_dist_sum += pair_min_dist
-        pair_nb_sum += pair_nb
-        pair_sb_sum += pair_sb
-        pair_hb_sum += pair_hb
-        pair_int_sum += pair_int
+            min_dist_sum += f_mindist
+            nb_sum += f_nb
+            sb_sum += f_sb
+            hb_sum += f_hb
+            int_sum += f_int
 
-        # Welford online update for CP variance
-        delta = pair_cp - pair_cp_mean
-        pair_cp_mean += delta / (n_frames + 1)
-        delta2 = pair_cp - pair_cp_mean
-        pair_cp_m2 += delta * delta2
+            # Welford online update for CP variance
+            delta = f_cp - cp_mean
+            cp_mean += delta / (n_frames + 1)
+            delta2 = f_cp - cp_mean
+            cp_m2 += delta * delta2
 
-        # Collect backbone coordinates for correlation
-        corr_list.append(frame[ca_idx].copy())
+            # Collect backbone coordinates for correlation
+            corr_list.append(frame[ca_idx].copy())
 
-        n_frames += 1
+            n_frames += 1
 
     # Compute average values
-    ave_min_dist = (pair_min_dist_sum / n_frames) * 10
-    occ_nb = pair_nb_sum / n_frames
-    occ_sb = pair_sb_sum / n_frames
-    occ_hb = pair_hb_sum / n_frames
-    occ_int = pair_int_sum / n_frames
+    ave_min_dist = (min_dist_sum / n_frames)
+    occ_nb = nb_sum / n_frames
+    occ_sb = sb_sum / n_frames
+    occ_hb = hb_sum / n_frames
+    occ_int = int_sum / n_frames
 
-    # Communication Propensity = variance * 100, then invert
-    cp = (pair_cp_m2 / n_frames) * 100
-    cp = abs(cp - max(cp))
+    # Communication Propensity = variance, then invert
+    cp = (cp_m2 / n_frames)
+    cp = abs(cp - np.max(cp))
 
     # MI & GC from backbone coordinates
     corr_coords = np.stack(corr_list)
@@ -109,35 +111,33 @@ def compute_descriptors(arg, resids_to_atoms, resids_to_noh, atoms_to_resids, ca
 
     return ave_min_dist, occ_nb, cp, occ_sb, occ_hb, occ_int, mi, gc
 
-
 @njit(parallel=True, fastmath=True, cache=True)
 def get_frame_info(frame_coords, noh_idx, noh_n, ca_idx, nb_cut, sb_cut, da_cut,
                    ha_cut, dha_cut, oxy_idx, oxy_n, nitro_idx, nitro_n,
                    donors_idx, donors_n, hydros_idx, hydros_n,
                    acceptors_idx, acceptors_n):
     n_resids = noh_n.shape[0]
-    n_pairs = n_resids * (n_resids - 1) // 2
 
-    pair_min_dists = np.zeros(n_pairs)
-    pair_nb = np.zeros(n_pairs)
-    pair_cp = np.zeros(n_pairs)
-    pair_sb = np.zeros(n_pairs)
-    pair_hb = np.zeros(n_pairs)
-    pair_int = np.zeros(n_pairs)
+    mat_min_dist = np.zeros((n_resids, n_resids))
+    mat_nb = np.zeros((n_resids, n_resids))
+    mat_cp = np.zeros((n_resids, n_resids))
+    mat_sb = np.zeros((n_resids, n_resids))
+    mat_hb = np.zeros((n_resids, n_resids))
+    mat_int = np.zeros((n_resids, n_resids))
 
     for i in prange(n_resids):
         coords_i = frame_coords[noh_idx[i, :noh_n[i]]]
         calpha_i = frame_coords[ca_idx[i]]
-        base = i * n_resids - i * (i + 1) // 2
         for j in range(i + 1, n_resids):
-            index = base + (j - i - 1)
             coords_j = frame_coords[noh_idx[j, :noh_n[j]]]
             calpha_j = frame_coords[ca_idx[j]]
 
             min_dist = calc_min_dist(coords_i, coords_j)
-            pair_min_dists[index] = min_dist
-            pair_nb[index] = 1.0 if min_dist < nb_cut else 0.0
-            pair_cp[index] = calc_dist(calpha_i, calpha_j)
+            mat_min_dist[i, j] = mat_min_dist[j, i] = min_dist
+            nb_val = 1.0 if min_dist < nb_cut else 0.0
+            mat_nb[i, j] = mat_nb[j, i] = nb_val
+            cp_val = calc_dist(calpha_i, calpha_j)
+            mat_cp[i, j] = mat_cp[j, i] = cp_val
 
             sb = 0
             if (min_dist < sb_cut) and (i + 1 != j):
@@ -148,7 +148,7 @@ def get_frame_info(frame_coords, noh_idx, noh_n, ca_idx, nb_cut, sb_cut, da_cut,
                     sb += find_sb(frame_coords, oxy_idx[j, :oxy_n[j]],
                                   nitro_idx[i, :nitro_n[i]], sb_cut)
             if sb:
-                pair_sb[index] = 1.0
+                mat_sb[i, j] = mat_sb[j, i] = 1.0
 
             hb = 0
             if min_dist <= da_cut:
@@ -163,9 +163,9 @@ def get_frame_info(frame_coords, noh_idx, noh_n, ca_idx, nb_cut, sb_cut, da_cut,
                                   acceptors_idx[i, :acceptors_n[i]],
                                   da_cut, ha_cut, dha_cut)
             if hb:
-                pair_hb[index] = 1.0
+                mat_hb[i, j] = mat_hb[j, i] = 1.0
 
             if sb or hb:
-                pair_int[index] = 1.0
+                mat_int[i, j] = mat_int[j, i] = 1.0
 
-    return pair_min_dists, pair_nb, pair_cp, pair_sb, pair_hb, pair_int
+    return mat_min_dist, mat_cp, mat_nb, mat_sb, mat_hb, mat_int

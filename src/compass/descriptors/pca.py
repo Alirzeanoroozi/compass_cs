@@ -128,7 +128,7 @@ def run_pca(arg, matrices, n, first_timer):
     del data
     adj_mat_raw = calc_adjacency_matrix(pca_result)
     adj_mat = adj_mat_raw.toarray()
-    adj_mat = 1 - adj_mat
+    adj_mat = 1 - adj_mat # invert the adjacency matrix
     del adj_mat_raw
     adj_name = geom.get_matrix_name(arg.out_dir, arg.title, "ADJACENCY")
     adj_mat = geom.save_matrix(adj_mat, n, adj_name, norm=True, prec=4)
