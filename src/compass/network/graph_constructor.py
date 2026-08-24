@@ -1,6 +1,7 @@
 import json
 import matplotlib.pyplot as plt
 import networkx as nx
+import numpy as np
 
 from compass.network.read_files import read_matrix
 
@@ -20,10 +21,15 @@ class GraphConstructor:
         for i in range(num_nodes):
             G.add_node(i)
 
+        # The adjacency matrix holds couplings (high = strongly coupled), while
+        # networkx treats 'weight' as a cost to minimise. Store -log(coupling)
+        # so shortest paths and centralities favour strong couplings.
+        cutoff = float(distance_cutoff)
         for i in range(num_nodes):
             for j in range(i + 1, num_nodes):
-                if min_dist_matrix[i, j] < float(distance_cutoff) and adjacency_matrix[i, j] > 0:
-                    G.add_edge(i, j, weight=adjacency_matrix[i, j])
+                coupling = adjacency_matrix[i, j]
+                if min_dist_matrix[i, j] < cutoff and coupling > 0:
+                    G.add_edge(i, j, weight=-np.log(coupling))
         return G
 
     def save_graph_and_mapping(self, G, atom_mapping, output_file):

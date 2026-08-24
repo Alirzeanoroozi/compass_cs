@@ -89,15 +89,15 @@ def compute_descriptors(arg, resids_to_atoms, resids_to_noh, calphas, oxy, nitro
 
             n_frames += 1
 
-    # Compute average values
-    ave_min_dist = (min_dist_sum / n_frames)
+    # Compute average values (mdtraj coordinates are in nm; convert to angstrom)
+    ave_min_dist = (min_dist_sum / n_frames) * 10
     occ_nb = nb_sum / n_frames
     occ_sb = sb_sum / n_frames
     occ_hb = hb_sum / n_frames
     occ_int = int_sum / n_frames
 
-    # Communication Propensity = variance, then invert
-    cp = (cp_m2 / n_frames)
+    # Communication Propensity = variance (nm^2 -> angstrom^2), then invert
+    cp = (cp_m2 / n_frames) * 100
     cp = abs(cp - np.max(cp))
 
     # MI & GC from backbone coordinates
