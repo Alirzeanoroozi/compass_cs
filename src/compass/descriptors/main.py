@@ -8,10 +8,21 @@ from tqdm import tqdm
 import compass.descriptors.correlations as corr
 from compass.descriptors.geometry import calc_dist, calc_min_dist, find_hb, find_sb
 
-def get_xyz_chunks(trajs, topo, chunk_size=500):
+def get_xyz_chunks(trajs, topo, chunk_size=500, max_frames=None):
+    n_loaded = 0
     for traj in trajs:
         for chunk in md.iterload(traj, top=topo, chunk=chunk_size):
-            yield chunk.xyz
+            xyz = chunk.xyz
+            if max_frames is not None:
+                remaining = max_frames - n_loaded
+                if remaining <= 0:
+                    return
+                if xyz.shape[0] > remaining:
+                    xyz = xyz[:remaining]
+            yield xyz
+            n_loaded += xyz.shape[0]
+            if max_frames is not None and n_loaded >= max_frames:
+                return
 
 def _pad_index_map(index_map, n_resids):
     """Pad a residue -> atom-index map into (n_resids, max_len) arrays for Numba."""
@@ -41,14 +52,14 @@ def compute_descriptors(arg, resids_to_atoms, resids_to_noh, calphas, oxy, nitro
     n_resids = len(resids_to_atoms)
 
     min_dist_sum = np.zeros((n_resids, n_resids))
-    nb_sum = np.zeros((n_resids, n_resids))
-    sb_sum = np.zeros((n_resids, n_resids))
-    hb_sum = np.zeros((n_resids, n_resids))
-    int_sum = np.zeros((n_resids, n_resids))
+    nb_sum = np.zeros((n_resids, n_resids)) # non-bonded interactions
+    sb_sum = np.zeros((n_resids, n_resids)) # salt-bridge interactions
+    hb_sum = np.zeros((n_resids, n_resids)) # hydrogen bonds
+    int_sum = np.zeros((n_resids, n_resids)) # interactions (salt-bridge + hydrogen bonds)
 
     # Welford online variance accumulators for CP
-    cp_mean = np.zeros((n_resids, n_resids))
-    cp_m2 = np.zeros((n_resids, n_resids))
+    cp_mean = np.zeros((n_resids, n_resids)) # communication propensity
+    cp_m2 = np.zeros((n_resids, n_resids)) # communication propensity variance
 
     # Backbone coords collected per frame for MI/GC
     corr_list = []
@@ -63,7 +74,10 @@ def compute_descriptors(arg, resids_to_atoms, resids_to_noh, calphas, oxy, nitro
 
     chunk_size = 50
     n_frames = 0
-    for chunk_xyz in tqdm(get_xyz_chunks(arg.traj.split(), arg.topo, chunk_size=chunk_size)):
+    max_frames = arg.n_frames
+    if max_frames is not None:
+        print(f" 📋 System details: using first {max_frames} frames across all trajectories")
+    for chunk_xyz in tqdm(get_xyz_chunks(arg.traj.split(), arg.topo, chunk_size=chunk_size, max_frames=max_frames)):
         n_chunk_frames = chunk_xyz.shape[0]
         for f in range(n_chunk_frames):
             frame = np.ascontiguousarray(chunk_xyz[f])
@@ -88,6 +102,11 @@ def compute_descriptors(arg, resids_to_atoms, resids_to_noh, calphas, oxy, nitro
             corr_list.append(frame[ca_idx].copy())
 
             n_frames += 1
+
+    if n_frames == 0:
+        raise ValueError("No frames were loaded from the trajectory files")
+    if max_frames is not None and n_frames < max_frames:
+        print(f" ⚠️  Only {n_frames} frames were available (requested {max_frames})")
 
     # Compute average values (mdtraj coordinates are in nm; convert to angstrom)
     ave_min_dist = (min_dist_sum / n_frames) * 10

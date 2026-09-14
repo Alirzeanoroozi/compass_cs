@@ -29,7 +29,7 @@ class GraphConstructor:
             for j in range(i + 1, num_nodes):
                 coupling = adjacency_matrix[i, j]
                 if min_dist_matrix[i, j] < cutoff and coupling > 0:
-                    G.add_edge(i, j, weight=-np.log(coupling))
+                    G.add_edge(i, j, weight=max(-np.log(coupling), 1e-6))
         return G
 
     def save_graph_and_mapping(self, G, atom_mapping, output_file):

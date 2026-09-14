@@ -1,5 +1,7 @@
-import random
+import colorsys
 import json
+import math
+import random
 
 from compass.network.read_files import read_centrality_from_file, read_edge_betweenness_from_file
 
@@ -43,8 +45,14 @@ class PyMOLVisualizer:
             [0.5, 0.5, 0.0],
         ]
 
+        color_rng = random.Random(42)
+
         def generate_random_color():
-            return [random.random(), random.random(), random.random()]
+            return [
+                color_rng.random(),
+                color_rng.random(),
+                color_rng.random(),
+            ]
 
         community_colors = {}
         for i, community in enumerate(communities):
@@ -98,6 +106,7 @@ class PyMOLVisualizer:
 
     def cliques_pml(self, cliques_file, output_pml):
         cliques = self.parse_cliques_file(cliques_file)
+        color_rng = random.Random(42)
 
         with open(output_pml, 'w') as f:
             f.write(f"load {self.pdb_file}\n")
@@ -105,7 +114,11 @@ class PyMOLVisualizer:
             f.write("set cartoon_color, grey90\n")
 
             for i, (clique, nodes) in enumerate(cliques.items(), start=1):
-                color = [random.random(), random.random(), random.random()]
+                color = [
+                    color_rng.random(),
+                    color_rng.random(),
+                    color_rng.random(),
+                ]
                 f.write(
                     f"set_color clique_{i}, [{', '.join(map(str, color))}]\n")
                 selection_residues = []
@@ -132,15 +145,13 @@ class PyMOLVisualizer:
     def graph_pml(self, centrality_file, edge_betweenness_file, output_pml):
         centrality_df = read_centrality_from_file(centrality_file)
         betweenness_df = read_edge_betweenness_from_file(edge_betweenness_file)
-        output_files = {
-            "all": open(f"{output_pml}_all.pml", 'w'),
-        }
+        out_file = open(output_pml, 'w')
+
 
         backbone = "(name CA or name C5' or name GC or name C5X)"
-        for file in output_files.values():
-            file.write(f"load {self.pdb_file}\n")
-            file.write(f"show_as cartoon, structure\n")
-            file.write(f"set cartoon_transparency, 0.6\n")
+        out_file.write(f"load {self.pdb_file}\n")
+        out_file.write(f"show_as cartoon, structure\n")
+        out_file.write(f"set cartoon_transparency, 0.6\n")
 
         max_centrality = centrality_df['Betweenness'].max()
         for _, row in centrality_df.iterrows():
@@ -149,11 +160,8 @@ class PyMOLVisualizer:
             centrality_value = row['Betweenness']
             norm_centrality = centrality_value / max_centrality if max_centrality else 0
             sphere_scale = 0.3 + 1 * norm_centrality
-            for file in output_files.values():
-                file.write(
-                    f"show spheres, chain {chain_id} and resi {res_num} and {backbone}\n")
-                file.write(
-                    f"set sphere_scale, {sphere_scale:.2f}, chain {chain_id} and resi {res_num} and {backbone}\n")
+            out_file.write(f"show spheres, chain {chain_id} and resi {res_num} and {backbone}\n")
+            out_file.write(f"set sphere_scale, {sphere_scale:.2f}, chain {chain_id} and resi {res_num} and {backbone}\n")
 
         max_betweenness = betweenness_df['Betweenness'].max()
         for _, row in betweenness_df.iterrows():
@@ -165,22 +173,16 @@ class PyMOLVisualizer:
             norm_betweenness = betweenness_value / max_betweenness if max_betweenness else 0
             thickness = 0.5 + 10 * norm_betweenness
 
-            output_files["all"].write(
-                f"distance edge_{res1}_{res2}, chain {chain1} and resi {res1} and {backbone}, chain {chain2} and resi {res2} and {backbone}\n"
-            )
-            output_files["all"].write(
-                f"set dash_width, {thickness:.2f}, edge_{res1}_{res2}\n"
-            )
+            out_file.write(f"distance edge_{res1}_{res2}, chain {chain1} and resi {res1} and {backbone}, chain {chain2} and resi {res2} and {backbone}\n")
+            out_file.write(f"set dash_width, {thickness:.2f}, edge_{res1}_{res2}\n")
 
-        for file in output_files.values():
-            file.write("hide labels\n")
-            file.write("set dash_gap, 0\n")
-            file.write("set dash_color, black\n")
-            file.write("bg_color white\n")
-            file.close()
+        out_file.write("hide labels\n")
+        out_file.write("set dash_gap, 0\n")
+        out_file.write("set dash_color, black\n")
+        out_file.write("bg_color white\n")
+        out_file.close()
 
-        print(
-            f" 🧊  PyMOL script for graph attributes saved with prefix {output_pml}")
+        print(f" 🧊  PyMOL script for graph attributes saved to {output_pml}")
 
     def highlight_top_nodes_pml(self, pdb_file, atom_mapping, nodes_file, output_pml_file):
         """
@@ -249,81 +251,103 @@ class PyMOLVisualizer:
 
         print(f" 🧊  PyMOL script for residue paths saved to {output_pml_file}")
 
-    def write_pml_script_for_top_shortest_paths(self, top_file, edge_betweenness_file, output_pml_file):
+    def write_pml_script_for_shortest_paths(self, paths_file, edge_betweenness_file, output_pml_file):
         betweenness_df = read_edge_betweenness_from_file(edge_betweenness_file)
-        max_betweenness = betweenness_df['Betweenness'].max()
 
-        with open(top_file, 'r') as f:
+        def edge_key(res_num1, chain_id1, res_num2, chain_id2):
+            residue1 = (str(chain_id1), int(res_num1))
+            residue2 = (str(chain_id2), int(res_num2))
+            return tuple(sorted((residue1, residue2)))
+
+        betweenness_by_edge = {}
+        finite_betweenness = []
+        for row in betweenness_df.itertuples(index=False):
+            betweenness = float(row.Betweenness)
+            betweenness_by_edge[
+                edge_key(row.Res1, row.Chain1, row.Res2, row.Chain2)
+            ] = betweenness
+            if math.isfinite(betweenness):
+                finite_betweenness.append(betweenness)
+        max_betweenness = max(finite_betweenness, default=0.0)
+
+        with open(paths_file, 'r') as f:
             payload = json.load(f)
-        paths = [entry["path"] for entry in payload.get("paths", []) if "path" in entry]
+        path_entries = [
+            entry
+            for entry in payload.get("paths", [])
+            if len(entry.get("path", [])) >= 2
+        ]
 
         with open(output_pml_file, 'w') as f:
-            written_selections = set()
-            written_distances = set()
-            written_spheres = set()
-            f.write(f"load {self.pdb_file}\n")
-            for path in paths:
-                for i in range(len(path) - 1):
-                    node1 = path[i]
-                    node2 = path[i + 1]
-                    try:
-                        res_name1, atom_name1, res_num1, chain_id1 = self.atom_mapping[str(node1)]
-                        res_name2, atom_name2, res_num2, chain_id2 = self.atom_mapping[str(node2)]
-                    except KeyError as e:
-                        print(f"Warning: Node {e} not found in atom mappings.")
-                        continue
-
-                    edge_betweenness_row = betweenness_df[((betweenness_df['Res1'] == res_num1) & (betweenness_df['Res2'] == res_num2)) | ((betweenness_df['Res1'] == res_num2) & (betweenness_df['Res2'] == res_num1))]
-                    if edge_betweenness_row.empty:
-                        print(f"Warning: No betweenness data for edge ({node1}, {node2}).")
-                        continue
-
-                    betweenness_value = edge_betweenness_row.iloc[0]['Betweenness']
-                    norm_betweenness = betweenness_value / max_betweenness if max_betweenness else 0
-                    thickness = 1 + 10 * norm_betweenness
-
-                    selection1 = f"select resi_{res_num1}, chain {chain_id1} and resi {res_num1} and name {atom_name1}"
-                    selection2 = f"select resi_{res_num2}, chain {chain_id2} and resi {res_num2} and name {atom_name2}"
-                    if selection1 not in written_selections:
-                        f.write(f"{selection1}\n")
-                        written_selections.add(selection1)
-                    if selection2 not in written_selections:
-                        f.write(f"{selection2}\n")
-                        written_selections.add(selection2)
-
-                    sphere_cmd1 = f"show spheres, resi {res_num1} and chain {chain_id1} and name {atom_name1}"
-                    sphere_cmd2 = f"show spheres, resi {res_num2} and chain {chain_id2} and name {atom_name2}"
-                    if sphere_cmd1 not in written_spheres:
-                        f.write(f"{sphere_cmd1}\n")
-                        written_spheres.add(sphere_cmd1)
-                    if sphere_cmd2 not in written_spheres:
-                        f.write(f"{sphere_cmd2}\n")
-                        written_spheres.add(sphere_cmd2)
-
-                    sorted_res = sorted([
-                        (res_num1, chain_id1, atom_name1),
-                        (res_num2, chain_id2, atom_name2),
-                    ])
-                    distance_key = f"edge_{sorted_res[0][0]}_{sorted_res[1][0]}"
-                    distance_cmd = (
-                        f"distance {distance_key}, "
-                        f"chain {sorted_res[0][1]} and resi {sorted_res[0][0]} and name {sorted_res[0][2]}, "
-                        f"chain {sorted_res[1][1]} and resi {sorted_res[1][0]} and name {sorted_res[1][2]}"
-                    )
-                    if distance_cmd not in written_distances:
-                        f.write(f"{distance_cmd}\n")
-                        f.write(
-                            f"set dash_width, {thickness:.2f}, {distance_key}\n")
-                        written_distances.add(distance_cmd)
-                break
-            f.write("hide labels\n")
-            f.write("set dash_gap, 0\n")
-            f.write("set dash_color, grey10\n")
+            f.write(f'load "{self.pdb_file}", structure\n')
+            f.write("show cartoon, structure\n")
+            f.write("color grey80, structure\n")
+            f.write("set cartoon_transparency, 0.6, structure\n")
             f.write("bg_color white\n")
-            f.write("set sphere_transparency, 0.3\n")
-            f.write("set sphere_scale, 0.5\n")
 
-            print(f"🧊 PyMOL script for top shortest paths saved to {output_pml_file}")
+            for path_index, entry in enumerate(path_entries, start=1):
+                path = entry["path"]
+                mapped_path = [
+                    self.atom_mapping[str(node)]
+                    for node in path
+                ]
+                _, _, source_res_num, source_chain_id = mapped_path[0]
+                _, _, target_res_num, target_chain_id = mapped_path[-1]
+                source_chain = str(source_chain_id) or "none"
+                target_chain = str(target_chain_id) or "none"
+                path_name = (
+                    f"path_{path_index:02d}_"
+                    f"{source_chain}{source_res_num}_to_"
+                    f"{target_chain}{target_res_num}"
+                )
+                color_name = f"path_color_{path_index:02d}"
+                hue = ((path_index - 1) * 0.61803398875) % 1.0
+                red, green, blue = colorsys.hsv_to_rgb(hue, 0.75, 0.95)
+
+                path_edges = []
+                path_betweenness = []
+                for node_index in range(len(mapped_path) - 1):
+                    _, atom_name1, res_num1, chain_id1 = mapped_path[node_index]
+                    _, atom_name2, res_num2, chain_id2 = mapped_path[node_index + 1]
+                    path_edges.append((
+                        f"chain {chain_id1} and resi {res_num1} "
+                        f"and name {atom_name1}",
+                        f"chain {chain_id2} and resi {res_num2} "
+                        f"and name {atom_name2}",
+                    ))
+                    betweenness = betweenness_by_edge.get(
+                        edge_key(res_num1, chain_id1, res_num2, chain_id2)
+                    )
+                    if betweenness is not None and math.isfinite(betweenness):
+                        path_betweenness.append(betweenness)
+
+                mean_betweenness = (
+                    sum(path_betweenness) / len(path_betweenness)
+                    if path_betweenness
+                    else 0.0
+                )
+                normalized_betweenness = (
+                    mean_betweenness / max_betweenness
+                    if max_betweenness > 0
+                    else 0.0
+                )
+                thickness = 2.0 + 4.0 * normalized_betweenness
+
+                f.write(
+                    f"set_color {color_name}, "
+                    f"[{red:.3f}, {green:.3f}, {blue:.3f}]\n"
+                )
+                for selection1, selection2 in path_edges:
+                    f.write(
+                        f"distance {path_name}, {selection1}, {selection2}\n"
+                    )
+                f.write(f"hide labels, {path_name}\n")
+                f.write(f"set dash_gap, 0, {path_name}\n")
+                f.write(f"set dash_width, {thickness:.2f}, {path_name}\n")
+                f.write(f"set dash_color, {color_name}, {path_name}\n")
+                f.write(f"group shortest_paths, {path_name}\n")
+
+            print(f"🧊 PyMOL script for shortest paths saved to {output_pml_file}")
 
 
     def write_pml_script_for_alternative_paths(self, alternative_paths_file,

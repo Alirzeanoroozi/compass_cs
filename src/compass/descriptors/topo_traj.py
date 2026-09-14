@@ -18,10 +18,9 @@ def select_backbone_atoms(topology):
     selected = topology.select(BACKBONE_SELECTION)
     return sorted(selected.astype(int))
 
-def prepare_datastructures(trajectories, topo, out_dir, heavies, first_timer):
-    # Load trajectory
-    trajs = trajectories.split()
-    mini_traj = next(md.iterload(trajs[0], top=topo, chunk=1)) # first ensemble
+def prepare_datastructures(topo, out_dir, heavies, first_timer):
+    mini_traj = md.load(topo)
+
     full_topo, bonds = mini_traj.topology.to_dataframe()
     full_topo_file = join(out_dir, 'full_topo_file.txt')
     with open(full_topo_file, 'w') as file:
@@ -37,7 +36,7 @@ def prepare_datastructures(trajectories, topo, out_dir, heavies, first_timer):
     bonds_file = join(out_dir, 'bonds_file.txt')
     with open(bonds_file, 'w') as file:
         for bond in bonds:
-            file.write(f"Bond: {bond[0]}, {bond[1]}\n")
+            file.write(f"Bond: {int(bond[0])}, {int(bond[1])}\n")
 
     resids_to_atoms, resids_to_noh = get_resids_indices(mini_traj)
     atoms_to_resids = {y: x for x in resids_to_atoms for y in resids_to_atoms[x]}
@@ -51,7 +50,6 @@ def prepare_datastructures(trajectories, topo, out_dir, heavies, first_timer):
     _save_index_maps(out_dir, resids_to_atoms, resids_to_noh, atoms_to_resids, calphas, oxy, nitro, donors, hydros, acceptors)
 
     prep_time = round(time.time() - first_timer, 2)
-    print(f" 📋 System details: number of trajectories are {len(trajs)}")
     print(f" 📋 System details: number of residues are {len(calphas)}")
     print(f" 📋 System details: number of atoms are {len(atoms_to_resids)}")
     print(f" ⏱️  Until datastructures prepared: {prep_time} s")
@@ -116,7 +114,7 @@ def get_calpha_p_indices(trajectory, atoms_to_resids, map_file):
     # Write atom details to the specified map_file
     with open(map_file, 'w') as file:
         for idx in backbone_atom_indices:
-            atom = trajectory.topology.atom(int(idx))
+            atom = trajectory.topology.atom(idx)
 
             # Writing atom details to file
             file.write(f"Atom Index: {idx}, Atom Name: {atom.name}, "
@@ -124,7 +122,7 @@ def get_calpha_p_indices(trajectory, atoms_to_resids, map_file):
                        f"Residue Number: {atom.residue}, chain id:{atom.residue.chain.chain_id}\n")
 
     # residue index -> backbone atom index (needed by frame_coords[calphas[i]])
-    calphas_p = {int(atoms_to_resids[idx]): int(idx) for idx in backbone_atom_indices}
+    calphas_p = {int(atoms_to_resids[idx]): idx for idx in backbone_atom_indices}
 
     return calphas_p
 

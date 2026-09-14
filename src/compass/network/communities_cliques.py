@@ -18,8 +18,10 @@ class CommunityDetector:
                 - communities (dict): A dictionary mapping nodes to their community index.
                 - modularity (float): The modularity of the partition.
         """
-        edges = list(self.G.edges())
-        nodes = list(self.G.nodes())
+        nodes = sorted(self.G.nodes())
+        edges = sorted(
+            tuple(sorted(edge)) for edge in self.G.edges()
+        )
 
         g = ig.Graph()
         g.add_vertices(len(nodes))
@@ -28,14 +30,25 @@ class CommunityDetector:
                      edges]
         g.add_edges(edge_list)
 
-        partition = la.find_partition(g, la.ModularityVertexPartition)
+        partition = la.find_partition(
+            g,
+            la.ModularityVertexPartition,
+            seed=42,
+        )
         modularity = partition.modularity
 
-        communities = {}
-        for idx, community in enumerate(partition):
-            for node_idx in community:
-                original_node = nodes[node_idx]
-                communities[original_node] = idx
+        partition_members = sorted(
+            (
+                sorted(nodes[node_idx] for node_idx in community)
+                for community in partition
+            ),
+            key=tuple,
+        )
+        communities = {
+            node: community_idx
+            for community_idx, members in enumerate(partition_members)
+            for node in members
+        }
 
         print(
             f" 🧩  Leiden detected {len(set(communities.values()))} communities with modularity {modularity:.4f}.")
@@ -112,7 +125,10 @@ class CliqueDetector:
             all_cliques = list(nx.find_cliques(self.G))
             large_cliques = [clique for clique in all_cliques if
                              len(clique) > 2]
-            sorted_large_cliques = sorted(large_cliques, key=len, reverse=True)
+            sorted_large_cliques = sorted(
+                (sorted(clique) for clique in large_cliques),
+                key=lambda clique: (-len(clique), clique),
+            )
             selected_cliques = []
             used_nodes = set()
 

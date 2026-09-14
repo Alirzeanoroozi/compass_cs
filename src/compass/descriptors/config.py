@@ -13,7 +13,28 @@ allowed_params = {
     "paths": {"find_path", "sources", "targets"}
 }
 
+# Optional keys may be omitted. n_frames: first N frames across all trajectories (0 = all).
+optional_params = {
+    "generals": {"n_frames"},
+}
+
 allowed_heavies = {"S", "N", "O"}
+
+def _parse_n_frames(raw):
+    if raw is None:
+        return None
+    value = str(raw).strip()
+    if value in ("", "0", "all", "None", "none"):
+        return None
+    try:
+        n_frames = int(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"n_frames must be a non-negative integer or 0/all (use all frames), got {raw!r}"
+        ) from exc
+    if n_frames < 0:
+        raise ValueError("n_frames must be >= 0 (0 means use all frames)")
+    return n_frames
 
 def read_config_file(config_path):
     if not os.path.exists(config_path):
@@ -40,13 +61,16 @@ def check_config(config_obj):
     config_dict = {}
     for section in allowed_params:
         allowed_keys = allowed_params[section]
-        read_keys = config_obj[section]
-        same_keys = set(read_keys) == allowed_keys
-        if not same_keys:
+        optional_keys = optional_params.get(section, set())
+        read_keys = set(config_obj[section])
+        missing = allowed_keys - read_keys
+        unknown = read_keys - allowed_keys - optional_keys
+        if missing or unknown:
+            extra = f" Optional keys: {optional_keys}." if optional_keys else ""
             raise ValueError(
                 f"\nIncongruence in the number or naming of"
                 f" declared keys. Only the following are "
-                f"supported for section [{section}]: {allowed_keys}"
+                f"supported for section [{section}]: {allowed_keys}.{extra}"
             )
 
         # Update config
@@ -55,7 +79,7 @@ def check_config(config_obj):
 
     return config_dict
 
-def parse_params(config_path):
+def parse_params(config_path, validate_trajectories=True):
     config_obj = read_config_file(config_path)
     param_dict = check_config(config_obj)
     param_space = Namespace()
@@ -65,6 +89,7 @@ def parse_params(config_path):
     param_space.out_dir = normpath(join(root_dir, param_dict["generals"]["output_dir"]))
     param_space.topo = normpath(join(root_dir, param_dict["generals"]["topology"]))
     param_space.title = param_dict["generals"]["job_name"]
+    param_space.n_frames = _parse_n_frames(param_dict["generals"].get("n_frames"))
 
     # Descriptor params
     param_space.nb_cut = float(param_dict["non_bond"]["non_bond_cut"])
@@ -96,9 +121,10 @@ def parse_params(config_path):
     traj = param_dict["generals"]["trajectory"]
     trajs = [normpath(join(root_dir, x)) for x in traj.split()]
     param_space.traj = " ".join(trajs)
-    for x in trajs:
-        if not os.path.exists(x):
-            raise FileNotFoundError(f"Trajectory file not found: {x}")
+    if validate_trajectories:
+        for x in trajs:
+            if not os.path.exists(x):
+                raise FileNotFoundError(f"Trajectory file not found: {x}")
     if not os.path.exists(param_space.out_dir):
         os.makedirs(param_space.out_dir, exist_ok=True)
 

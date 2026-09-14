@@ -27,6 +27,12 @@ def compute_gc_matrix(corr_coords, block_size=128):
         GC_matrix: (n_residues, n_residues) generalized correlation matrix
     """
     n_frames, n_res, _ = corr_coords.shape
+    if n_frames < 2:
+        raise ValueError(
+            "Mutual information and generalized correlation need at least 2 "
+            f"frames to estimate covariance; got {n_frames}. Increase n_frames "
+            "in the [generals] section of the config file."
+        )
 
     # (3R, 3R) covariance viewed as (R, R, 3, 3) residue-pair blocks, so that
     # cov_blocks[i, j] is the 3x3 cross-covariance between residues i and j
