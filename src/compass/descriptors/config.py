@@ -1,4 +1,3 @@
-# Created by gonzalezroy at 6/6/24
 import configparser
 import os
 from argparse import Namespace
@@ -10,7 +9,7 @@ allowed_params = {
     "salt_bridges": {"NO_cut"},
     "hbonds": {"DA_cut", "HA_cut", "DHA_cut", "heavy"},
     "distance cutoffs": {"Graph", "Cliques"},
-    "paths": {"find_path", "sources", "targets"}
+    # "paths": {"find_path", "sources", "targets"}
 }
 
 # Optional keys may be omitted. n_frames: first N frames across all trajectories (0 = all).
@@ -79,7 +78,7 @@ def check_config(config_obj):
 
     return config_dict
 
-def parse_params(config_path, validate_trajectories=True):
+def parse_params(config_path):
     config_obj = read_config_file(config_path)
     param_dict = check_config(config_obj)
     param_space = Namespace()
@@ -103,10 +102,10 @@ def parse_params(config_path, validate_trajectories=True):
     param_space.dist_graph = float(param_dict["distance cutoffs"]["Graph"])
     param_space.dist_clique = float(param_dict["distance cutoffs"]["Cliques"])
 
-    # alternative paths between residues
-    param_space.find_path = str(param_dict["paths"]["find_path"])
-    param_space.source_residue = str(param_dict["paths"]["sources"])
-    param_space.target_residue = str(param_dict["paths"]["targets"])
+    # # alternative paths between residues
+    # param_space.find_path = str(param_dict["paths"]["find_path"])
+    # param_space.source_residue = str(param_dict["paths"]["sources"])
+    # param_space.target_residue = str(param_dict["paths"]["targets"])
 
     if not allowed_heavies.issuperset(param_space.heavies):
         raise ValueError(
@@ -121,10 +120,6 @@ def parse_params(config_path, validate_trajectories=True):
     traj = param_dict["generals"]["trajectory"]
     trajs = [normpath(join(root_dir, x)) for x in traj.split()]
     param_space.traj = " ".join(trajs)
-    if validate_trajectories:
-        for x in trajs:
-            if not os.path.exists(x):
-                raise FileNotFoundError(f"Trajectory file not found: {x}")
     if not os.path.exists(param_space.out_dir):
         os.makedirs(param_space.out_dir, exist_ok=True)
 
