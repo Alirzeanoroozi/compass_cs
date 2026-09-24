@@ -121,7 +121,6 @@ def compute_descriptors(arg, resids_to_atoms, resids_to_noh, calphas, oxy, nitro
 
     # MI & GC from backbone coordinates
     corr_coords = np.stack(corr_list)
-    del corr_list
     mi, gc = corr.compute_gc_matrix(corr_coords)
 
     running_time = round(time.time() - first_timer, 2)

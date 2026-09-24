@@ -52,8 +52,10 @@ MANIFEST
 .venv*/
 .conda*/
 .python-version
-example/*
+/example/
 Spain_Task/*
 __pycache__/*
 *.nbc
 *.nbi
+Sirah_traj_new/*
+example_new/
